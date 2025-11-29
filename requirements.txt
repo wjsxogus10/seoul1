@@ -1,0 +1,7 @@
+streamlit
+pandas
+geopandas
+plotly
+numpy
+shapely
+openpyxl
