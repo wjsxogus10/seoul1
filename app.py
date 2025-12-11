@@ -34,12 +34,9 @@ def load_and_merge_data():
         return None
 
     # [B] 사용자 데이터 병합
-    
-    # 컬럼 초기화
     cols_init = ['총_상주인구_수', '인구 밀도', '집객시설 수', '버스정류장_수', '버스정류장 밀도', '지하철역_수', '지하철역 밀도']
     for c in cols_init:
-        if c not in gdf.columns:
-            gdf[c] = 0
+        if c not in gdf.columns: gdf[c] = 0
             
     # 1. 상주 인구
     try:
@@ -98,7 +95,6 @@ def load_and_merge_data():
                 gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
         except: pass
     
-    # 지하철 파일 없을 때 0 처리 (에러 방지)
     if '지하철역_수' not in gdf.columns:
         gdf['지하철역_수'] = 0
         gdf['지하철역 밀도'] = 0
@@ -192,14 +188,13 @@ if valid_metrics:
             color_continuous_scale=colorscale
         )
         
-        # [핵심] 지도 툴팁 커스터마이징 (인덱스 제거 및 숫자 포맷)
+        # 지도 툴팁 설정 (인덱스 제거)
         is_float = '밀도' in selected_col or '비율' in selected_col
         num_format = ",.4f" if is_float else ",.0f"
         
         fig.update_traces(
             hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>"
         )
-        
         fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -207,11 +202,12 @@ if valid_metrics:
     with col_chart:
         st.subheader(f"📊 {selected_col} 순위 비교")
         
+        # 전체 데이터 평균 계산 (그래프 그리기 전)
+        avg_val = gdf[selected_col].mean()
+
         sort_opt = st.radio("정렬 기준:", ["상위", "하위"], horizontal=True, key="sort_chart")
         ascending = True if sort_opt == "하위" else False
-        # 부족 순위인 경우 로직 반대 (1위가 가장 부족하므로 상위에 와야 함)
-        if '부족' in selected_col: 
-            ascending = not ascending
+        if '부족' in selected_col: ascending = not ascending
 
         df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
         df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
@@ -219,6 +215,15 @@ if valid_metrics:
         fig_bar = px.bar(
             df_sorted, x='자치구명', y=selected_col, 
             text=selected_col, color='color', color_discrete_map='identity'
+        )
+        
+        # [핵심] 평균선 추가
+        fig_bar.add_hline(
+            y=avg_val, 
+            line_dash="dash", 
+            line_color="green", 
+            annotation_text=f"평균: {avg_val:,.2f}", 
+            annotation_position="top right"
         )
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
@@ -232,7 +237,7 @@ if valid_metrics:
     cols_to_show = ['자치구명'] + valid_metrics
     
     df_table = gdf[cols_to_show].sort_values(by=selected_col, ascending=ascending).head(display_count)
-    st.dataframe(df_table, use_container_width=True, hide_index=True) # 인덱스 숨김
+    st.dataframe(df_table, use_container_width=True, hide_index=True)
     
     csv = gdf[cols_to_show].to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 전체 데이터 다운로드 (CSV)", csv, "seoul_analysis.csv", "text/csv")
