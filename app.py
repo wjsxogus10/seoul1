@@ -12,12 +12,12 @@ from shapely.geometry import Point
 st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
 
 # --------------------------------------------------------------------------
-# 2. 데이터 로드 및 병합 함수 (데이터 정보 수집 추가)
+# 2. 데이터 로드 및 병합 함수
 # --------------------------------------------------------------------------
 @st.cache_data
 def load_and_merge_data():
     logs = []
-    data_info = {} # 데이터별 상세 정보 저장용
+    data_info = {} # 데이터 정보 저장
 
     # [A] 지도 데이터
     map_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
@@ -28,8 +28,7 @@ def load_and_merge_data():
         elif 'SIG_KOR_NM' in gdf.columns: gdf = gdf.rename(columns={'SIG_KOR_NM': '자치구명'})
         gdf_area = gdf.to_crs(epsg=5179)
         gdf['면적(km²)'] = gdf_area.geometry.area / 1_000_000
-        
-        data_info['지도'] = {'file': 'seoul_municipalities_geo_simple.json', 'status': '✅ 성공', 'msg': '서울시 행정구역 경계 데이터'}
+        data_info['지도'] = {'file': 'seoul_municipalities_geo_simple.json', 'status': '✅', 'desc': '서울시 행정구역 경계'}
     except Exception as e:
         return None, [f"❌ 지도 로드 실패: {e}"], {}
 
@@ -46,9 +45,9 @@ def load_and_merge_data():
         gdf = gdf.merge(grp, on='자치구명', how='left')
         gdf['총_상주인구_수'] = gdf['총_상주인구_수'].fillna(0)
         gdf['인구 밀도'] = gdf['총_상주인구_수'] / gdf['면적(km²)']
-        data_info['인구'] = {'file': pop_file, 'status': '✅ 성공', 'msg': '자치구별 상주인구 통계'}
+        data_info['인구'] = {'file': pop_file, 'status': '✅', 'desc': '자치구별 상주인구 통계'}
     except: 
-        data_info['인구'] = {'file': pop_file, 'status': '❌ 실패', 'msg': '파일을 찾을 수 없거나 읽기 오류'}
+        data_info['인구'] = {'file': pop_file, 'status': '❌', 'desc': '파일 없음'}
 
     # 2. 상권
     biz_file = '서울시 상권분석서비스(집객시설-자치구).csv'
@@ -58,9 +57,9 @@ def load_and_merge_data():
         gdf = gdf.drop(columns=['집객시설 수'], errors='ignore')
         gdf = gdf.merge(grp, on='자치구명', how='left')
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
-        data_info['상권'] = {'file': biz_file, 'status': '✅ 성공', 'msg': '자치구별 집객시설 수 통계'}
+        data_info['상권'] = {'file': biz_file, 'status': '✅', 'desc': '자치구별 집객시설 수'}
     except:
-        data_info['상권'] = {'file': biz_file, 'status': '❌ 실패', 'msg': '파일을 찾을 수 없거나 읽기 오류'}
+        data_info['상권'] = {'file': biz_file, 'status': '❌', 'desc': '파일 없음'}
 
     # 3. 버스
     bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
@@ -88,15 +87,15 @@ def load_and_merge_data():
                     gdf = gdf.merge(cnt, on='자치구명', how='left')
                     gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
                     gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-                    data_info['버스'] = {'file': bus_path, 'status': '✅ 성공', 'msg': f'정류장 좌표 매칭 완료 ({len(joined)}개)'}
+                    data_info['버스'] = {'file': bus_path, 'status': '✅', 'desc': f'좌표 매칭 완료 ({len(joined)}개)'}
                 else:
-                    data_info['버스'] = {'file': bus_path, 'status': '⚠️ 좌표 오류', 'msg': '좌표값이 위경도가 아닙니다.'}
+                    data_info['버스'] = {'file': bus_path, 'status': '⚠️', 'desc': '좌표계 오류 (위경도 아님)'}
             else:
-                data_info['버스'] = {'file': bus_path, 'status': '⚠️ 컬럼 오류', 'msg': 'X, Y 컬럼을 찾을 수 없습니다.'}
+                data_info['버스'] = {'file': bus_path, 'status': '⚠️', 'desc': '좌표 컬럼 없음'}
         except Exception as e:
-            data_info['버스'] = {'file': bus_path, 'status': '❌ 에러', 'msg': str(e)}
+            data_info['버스'] = {'file': bus_path, 'status': '❌', 'desc': str(e)}
     else:
-        data_info['버스'] = {'file': '없음', 'status': '❌ 없음', 'msg': '버스 관련 파일을 찾을 수 없습니다.'}
+        data_info['버스'] = {'file': '없음', 'status': '❌', 'desc': '파일 없음'}
 
     # 4. 지하철
     sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
@@ -118,7 +117,7 @@ def load_and_merge_data():
                 cols = ['자치구명', '지하철역_수']
                 if '지하철역 밀도' in df_sub.columns: cols.append('지하철역 밀도')
                 gdf = gdf.merge(df_sub[cols], on='자치구명', how='left')
-                data_info['지하철'] = {'file': sub_path, 'status': '✅ 성공', 'msg': '통계 데이터 병합 완료'}
+                data_info['지하철'] = {'file': sub_path, 'status': '✅', 'desc': '통계 데이터 병합'}
             else:
                 x_c = next((c for c in ['경도', 'X', 'x'] if c in df_sub.columns), None)
                 y_c = next((c for c in ['위도', 'Y', 'y'] if c in df_sub.columns), None)
@@ -130,9 +129,9 @@ def load_and_merge_data():
                     cnt = joined.groupby('자치구명').size().reset_index(name='지하철역_수')
                     gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                     gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    data_info['지하철'] = {'file': sub_path, 'status': '✅ 성공', 'msg': f'역 좌표 매칭 완료 ({len(joined)}개)'}
+                    data_info['지하철'] = {'file': sub_path, 'status': '✅', 'desc': f'좌표 매칭 완료 ({len(joined)}개)'}
                 else:
-                    data_info['지하철'] = {'file': sub_path, 'status': '⚠️ 컬럼 오류', 'msg': '좌표 또는 통계 컬럼이 없습니다.'}
+                    data_info['지하철'] = {'file': sub_path, 'status': '⚠️', 'desc': '컬럼 오류'}
             
             gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
             if '지하철역 밀도' not in gdf.columns:
@@ -141,11 +140,11 @@ def load_and_merge_data():
                 gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
 
         except Exception as e:
-            data_info['지하철'] = {'file': sub_path, 'status': '❌ 에러', 'msg': str(e)}
+            data_info['지하철'] = {'file': sub_path, 'status': '❌', 'desc': str(e)}
     else:
-        data_info['지하철'] = {'file': '없음', 'status': '❌ 없음', 'msg': '지하철 관련 파일을 찾을 수 없습니다.'}
+        data_info['지하철'] = {'file': '없음', 'status': '❌', 'desc': '파일 없음'}
 
-    # 5. 통계 및 Rename
+    # 5. 통계
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
     gdf['대중교통 밀도 (면적당)'] = gdf['총_교통수단_수'] / gdf['면적(km²)']
     pop_safe = gdf['총_상주인구_수'].replace(0, 1)
@@ -169,7 +168,7 @@ def load_and_merge_data():
     return gdf, logs, data_info
 
 # --------------------------------------------------------------------------
-# 3. 화면 구성 (페이지 분리)
+# 3. 화면 구성 및 시각화
 # --------------------------------------------------------------------------
 data_result = load_and_merge_data()
 if data_result is None or data_result[0] is None:
@@ -177,15 +176,6 @@ if data_result is None or data_result[0] is None:
     st.stop()
 
 gdf, logs, data_info = data_result
-
-# [사이드바] 데이터 소스 정보 표시 (New!)
-st.sidebar.title("🗂️ 메뉴")
-with st.sidebar.expander("📂 데이터 소스 확인", expanded=False):
-    for category, info in data_info.items():
-        st.markdown(f"**{category}**")
-        st.caption(f"{info['status']} | {info['file']}")
-        st.caption(f"└ {info['msg']}")
-        st.divider()
 
 page_mode = st.sidebar.radio("페이지 이동", ["🏙️ 서울시 전체 분석", "📍 자치구별 상세 리포트"])
 st.sidebar.markdown("---")
@@ -247,7 +237,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         )
         
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="black", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="black")
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
@@ -334,3 +324,23 @@ else:
 
     except Exception as e:
         st.error(f"상세 정보를 표시하는 중 오류가 발생했습니다: {e}")
+
+# --------------------------------------------------------------------------
+# [하단] 데이터 출처 표시 (Footer)
+# --------------------------------------------------------------------------
+st.markdown("---")
+with st.expander("📚 사용된 데이터 출처 보기", expanded=False):
+    st.markdown("#### 📂 데이터 파일 현황")
+    
+    # 데이터 정보를 표(DataFrame)로 변환하여 깔끔하게 표시
+    source_list = []
+    for cat, info in data_info.items():
+        source_list.append({
+            "데이터 종류": cat,
+            "상태": info['status'],
+            "파일명": info['file'],
+            "비고": info['desc']
+        })
+    
+    df_source = pd.DataFrame(source_list)
+    st.dataframe(df_source, use_container_width=True, hide_index=True)
