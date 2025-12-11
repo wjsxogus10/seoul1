@@ -126,6 +126,8 @@ def load_and_merge_data():
 
     return gdf
 
+
+
 # --------------------------------------------------------------------------
 # 3. 화면 구성 및 시각화
 # --------------------------------------------------------------------------
@@ -159,7 +161,6 @@ if gdf is not None:
                 center_lat, center_lon = map_data.geometry.centroid.y.values[0], map_data.geometry.centroid.x.values[0]
                 zoom = 11.0
             colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
-            
             fig = px.choropleth_mapbox(
                 map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
                 color=selected_col, mapbox_style="carto-positron", zoom=zoom,
@@ -180,7 +181,6 @@ if gdf is not None:
             if '부족' in selected_col: ascending = not ascending
             df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
             df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
-            
             fig_bar = px.bar(
                 df_sorted, x='자치구명', y=selected_col, text=selected_col, 
                 color='color', color_discrete_map='identity'
