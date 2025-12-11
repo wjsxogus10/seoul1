@@ -21,10 +21,8 @@ def load_and_merge_data():
     try:
         gdf = geopandas.read_file(map_url)
         gdf = gdf.to_crs(epsg=4326)
-        
         if 'name' in gdf.columns: gdf = gdf.rename(columns={'name': '자치구명'})
         elif 'SIG_KOR_NM' in gdf.columns: gdf = gdf.rename(columns={'SIG_KOR_NM': '자치구명'})
-            
         gdf_area = gdf.to_crs(epsg=5179)
         gdf['면적(km²)'] = gdf_area.geometry.area / 1_000_000
     except Exception as e:
@@ -54,51 +52,62 @@ def load_and_merge_data():
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
     except: pass
 
-    # 3. 버스 (엔진 지정)
+    # 3. 버스
     try:
         df_bus = pd.read_excel('./data/GGD_StationInfo_M.xlsx', engine='openpyxl').dropna(subset=['X', 'Y'])
         geom = [Point(xy) for xy in zip(df_bus['X'], df_bus['Y'])]
         gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
         joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
         cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
-        
         gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
         gdf = gdf.merge(cnt, on='자치구명', how='left')
         gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
         gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
     except: pass
 
-    # 4. 지하철 (에러 수정됨: engine='openpyxl' 추가)
+    # ==============================================================================
+    # 4. [수정됨] 지하철 데이터 (다양한 컬럼명 인식 강화)
+    # ==============================================================================
     subway_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
     if subway_files:
+        target_file = subway_files[0]
         try:
-            f_path = os.path.join('./data', subway_files[0])
+            f_path = os.path.join('./data', target_file)
             
-            # CSV면 그냥 읽고, 아니면 엑셀로 간주하고 엔진 지정
+            # 파일 읽기
             if f_path.lower().endswith('.csv'):
                 try: df_sub = pd.read_csv(f_path, encoding='cp949')
                 except: df_sub = pd.read_csv(f_path, encoding='utf-8')
             else:
-                # [여기가 핵심 수정] engine='openpyxl'을 꼭 넣어야 함
                 df_sub = pd.read_excel(f_path, engine='openpyxl')
             
-            # 좌표 컬럼 찾기
-            x_col = next((c for c in ['경도', 'X', 'lon', 'x'] if c in df_sub.columns), None)
-            y_col = next((c for c in ['위도', 'Y', 'lat', 'y'] if c in df_sub.columns), None)
+            # [핵심 수정] 찾을 컬럼 이름 후보 대폭 추가
+            x_candidates = ['경도', 'X', 'x', 'lon', 'LON', 'POINT_X', 'point_x', '좌표X', 'X좌표', 'WGS84_X']
+            y_candidates = ['위도', 'Y', 'y', 'lat', 'LAT', 'POINT_Y', 'point_y', '좌표Y', 'Y좌표', 'WGS84_Y']
+            
+            x_col = next((c for c in x_candidates if c in df_sub.columns), None)
+            y_col = next((c for c in y_candidates if c in df_sub.columns), None)
 
             if x_col and y_col:
                 df_sub = df_sub.dropna(subset=[x_col, y_col])
-                geom = [Point(xy) for xy in zip(df_sub[x_col], df_sub[y_col])]
-                gdf_sub = geopandas.GeoDataFrame(df_sub, geometry=geom, crs="EPSG:4326")
-                joined = geopandas.sjoin(gdf_sub, gdf, how="inner", predicate="within")
-                cnt = joined.groupby('자치구명').size().reset_index(name='지하철역_수')
                 
-                gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
-                gdf = gdf.merge(cnt, on='자치구명', how='left')
-                gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
-                gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
+                # 좌표계 검사 (값이 180보다 크면 위경도가 아님)
+                if df_sub[x_col].iloc[0] > 180:
+                     st.error(f"⚠️ [지하철] 좌표계 오류: '{x_col}' 값이 위도/경도가 아닙니다. (예: {df_sub[x_col].iloc[0]})\nEPSG:4326(위경도)로 변환된 파일을 올려주세요.")
+                else:
+                    geom = [Point(xy) for xy in zip(df_sub[x_col], df_sub[y_col])]
+                    gdf_sub = geopandas.GeoDataFrame(df_sub, geometry=geom, crs="EPSG:4326")
+                    joined = geopandas.sjoin(gdf_sub, gdf, how="inner", predicate="within")
+                    cnt = joined.groupby('자치구명').size().reset_index(name='지하철역_수')
+                    
+                    gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
+                    gdf = gdf.merge(cnt, on='자치구명', how='left')
+                    gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
+                    gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
             else:
-                st.error(f"⚠️ [지하철] 파일에 '경도/위도' 또는 'X/Y' 컬럼이 없습니다.")
+                # 못 찾았을 때, 실제 컬럼 이름을 화면에 보여줌 (진단용)
+                st.error(f"⚠️ [지하철] 파일에서 좌표 컬럼을 못 찾았습니다.\n**현재 파일의 컬럼 목록:** {list(df_sub.columns)}")
+                st.info("해결법: 엑셀 파일의 좌표 컬럼 이름을 'X', 'Y' 또는 '경도', '위도'로 바꿔주세요.")
         except Exception as e:
             st.error(f"⚠️ [지하철] 데이터 로드 실패: {e}")
 
