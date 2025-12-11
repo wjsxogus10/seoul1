@@ -237,7 +237,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         )
         
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="black", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="black")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
@@ -332,14 +332,16 @@ st.markdown("---")
 with st.expander("📚 사용된 데이터 출처 보기", expanded=False):
     st.markdown("#### 📂 데이터 파일 현황")
     
-    # 데이터 정보를 표(DataFrame)로 변환하여 깔끔하게 표시
     source_list = []
     for cat, info in data_info.items():
+        # [핵심] 에러가 났던 부분 수정: .get()으로 안전하게 가져옴
+        desc_text = info.get('desc', info.get('msg', '정보 없음'))
+        
         source_list.append({
             "데이터 종류": cat,
-            "상태": info['status'],
-            "파일명": info['file'],
-            "비고": info['desc']
+            "상태": info.get('status', '❓'),
+            "파일명": info.get('file', '-'),
+            "비고": desc_text
         })
     
     df_source = pd.DataFrame(source_list)
