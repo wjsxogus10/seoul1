@@ -59,21 +59,44 @@ def load_and_merge_data():
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
     except: pass
 
-    # 3. 버스
+    # ==============================================================================
+    # 3. [진단 모드] 버스 데이터 처리
+    # ==============================================================================
     try:
-        df_bus = pd.read_excel('./data/GGD_StationInfo_M.xlsx', engine='openpyxl').dropna(subset=['X', 'Y'])
+        df_bus = pd.read_excel('./data/GGD_StationInfo_M.xlsx', engine='openpyxl')
+        
+        # 컬럼 찾기 (대소문자/한글 대응)
         x_col = next((c for c in ['X', 'x', '경도', 'lon'] if c in df_bus.columns), None)
         y_col = next((c for c in ['Y', 'y', '위도', 'lat'] if c in df_bus.columns), None)
+
         if x_col and y_col:
-            geom = [Point(xy) for xy in zip(df_bus[x_col], df_bus[y_col])]
-            gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
-            joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
-            cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
-            gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
-            gdf = gdf.merge(cnt, on='자치구명', how='left')
-            gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
-            gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-    except: pass
+            df_bus = df_bus.dropna(subset=[x_col, y_col])
+            
+            # [중요] 좌표값 검사: 180보다 크면 위경도가 아님
+            sample_val = df_bus[x_col].iloc[0]
+            if sample_val > 180:
+                st.error(f"⚠️ [버스 데이터 오류] 좌표값이 위도/경도가 아닙니다. (값: {sample_val})\n해결책: 엑셀 파일의 좌표를 '위도/경도(WGS84)'로 변환해서 올려주세요.")
+            else:
+                geom = [Point(xy) for xy in zip(df_bus[x_col], df_bus[y_col])]
+                gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
+                joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
+                
+                # 매칭된 개수 확인
+                if joined.empty:
+                    st.warning("⚠️ [버스 데이터 경고] 서울시 지도 안에 포함된 정류장이 하나도 없습니다. (다른 지역 데이터일 수 있습니다.)")
+                else:
+                    cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
+                    gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+                    gdf = gdf.merge(cnt, on='자치구명', how='left')
+                    gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+                    gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+        else:
+            st.error(f"⚠️ [버스 데이터 오류] 엑셀 파일에 'X', 'Y' (또는 경도, 위도) 컬럼이 없습니다. (현재 컬럼: {list(df_bus.columns)})")
+            
+    except Exception as e:
+        # 파일이 없거나 읽기 에러인 경우
+        # st.error(f"⚠️ 버스 파일 로드 중 에러: {e}") 
+        pass
 
     # 4. 지하철
     subway_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
@@ -213,19 +236,11 @@ if valid_metrics:
                 center_lon = map_data.geometry.centroid.x.values[0]
                 zoom = 11.0
         
-        # [핵심 변경 1] 지도 색상표(Colorscale) 다변화
-        if '부족' in selected_col:
-            # 부족 순위는 빨간색이 진할수록 나쁨(1등) -> 뒤집힌 빨강
-            colorscale = 'Reds_r'
-        elif '밀도' in selected_col:
-            # 밀도는 오렌지~레드 계열
-            colorscale = 'YlOrRd'
-        elif '인구' in selected_col:
-            # 인구는 파란색 계열
-            colorscale = 'Blues'
-        else:
-            # 그 외(시설 수 등)는 기본 청록색 계열
-            colorscale = 'Viridis'
+        # 지도 색상
+        if '부족' in selected_col: colorscale = 'Reds_r'
+        elif '밀도' in selected_col: colorscale = 'YlOrRd'
+        elif '인구' in selected_col: colorscale = 'Blues'
+        else: colorscale = 'Viridis'
 
         fig = px.choropleth_mapbox(
             map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
@@ -247,16 +262,12 @@ if valid_metrics:
         if '부족' in selected_col: ascending = not ascending
         df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
         df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
-        
         fig_bar = px.bar(
             df_sorted, x='자치구명', y=selected_col, text=selected_col, 
             color='color', color_discrete_map='identity'
         )
-        
-        # [핵심 변경 2] 평균선 색상을 빨간색(red)으로 변경
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
         fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="red", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="red")
-        
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
         fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
