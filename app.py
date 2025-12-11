@@ -10,7 +10,7 @@ from shapely.geometry import Point
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
 st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
-st.title("🏙️ 서울시 대중교통 개선 대시보드")
+st.title("🏙️ 서울시 도시계획 및 대중교통 개선 대시보드")
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수 (안전 모드)
@@ -168,7 +168,7 @@ if valid_metrics:
     selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
     # -----------------------------------------------------------
-    # [상단] 요약 리포트
+    # [상단] 요약 리포트 (안전 모드 적용)
     # -----------------------------------------------------------
     if selected_district != '전체 서울시':
         try:
@@ -212,7 +212,21 @@ if valid_metrics:
                 center_lat = map_data.geometry.centroid.y.values[0]
                 center_lon = map_data.geometry.centroid.x.values[0]
                 zoom = 11.0
-        colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
+        
+        # [핵심 변경 1] 지도 색상표(Colorscale) 다변화
+        if '부족' in selected_col:
+            # 부족 순위는 빨간색이 진할수록 나쁨(1등) -> 뒤집힌 빨강
+            colorscale = 'Reds_r'
+        elif '밀도' in selected_col:
+            # 밀도는 오렌지~레드 계열
+            colorscale = 'YlOrRd'
+        elif '인구' in selected_col:
+            # 인구는 파란색 계열
+            colorscale = 'Blues'
+        else:
+            # 그 외(시설 수 등)는 기본 청록색 계열
+            colorscale = 'Viridis'
+
         fig = px.choropleth_mapbox(
             map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
             color=selected_col, mapbox_style="carto-positron", zoom=zoom,
@@ -233,20 +247,20 @@ if valid_metrics:
         if '부족' in selected_col: ascending = not ascending
         df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
         df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
+        
         fig_bar = px.bar(
             df_sorted, x='자치구명', y=selected_col, text=selected_col, 
             color='color', color_discrete_map='identity'
         )
+        
+        # [핵심 변경 2] 평균선 색상을 빨간색(red)으로 변경
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="red", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="red")
+        
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
         fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
         st.plotly_chart(fig_bar, use_container_width=True)
-
-    # -----------------------------------------------------------
-    # [삭제됨] 상세 데이터 표와 다운로드 버튼이 제거되었습니다.
-    # -----------------------------------------------------------
 
 else:
     st.warning("분석할 데이터 파일이 없어 지도만 표시됩니다.")
