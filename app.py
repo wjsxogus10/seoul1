@@ -12,24 +12,26 @@ st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보�
 st.title("🏙️ 서울시 도시계획 및 대중교통 개선 대시보드")
 
 # --------------------------------------------------------------------------
-# 2. 데이터 로드 및 병합 (디버깅 모드)
+# 2. 데이터 로드 및 병합 함수
 # --------------------------------------------------------------------------
 @st.cache_data
 def load_and_merge_data():
-    # [A] 지도 데이터
+    # [A] 지도 데이터 로드
     map_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
     try:
         gdf = geopandas.read_file(map_url)
         gdf = gdf.to_crs(epsg=4326)
+        
         if 'name' in gdf.columns: gdf = gdf.rename(columns={'name': '자치구명'})
         elif 'SIG_KOR_NM' in gdf.columns: gdf = gdf.rename(columns={'SIG_KOR_NM': '자치구명'})
+            
         gdf_area = gdf.to_crs(epsg=5179)
         gdf['면적(km²)'] = gdf_area.geometry.area / 1_000_000
     except Exception as e:
         st.error(f"지도 로드 실패: {e}")
         return None
 
-    # [B] 사용자 데이터 병합 (기본값 0 설정)
+    # [B] 사용자 데이터 병합
     cols_init = ['총_상주인구_수', '인구 밀도', '집객시설 수', '버스정류장_수', '버스정류장 밀도', '지하철역_수', '지하철역 밀도']
     for c in cols_init: gdf[c] = 0
 
@@ -52,59 +54,35 @@ def load_and_merge_data():
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
     except: pass
 
-    # ==============================================================================
-    # 3. [진단] 버스 정류장 데이터 (에러 원인 출력)
-    # ==============================================================================
-    bus_file = './data/GGD_StationInfo_M.xlsx'
-    if os.path.exists(bus_file):
-        try:
-            # 엑셀 읽기
-            df_bus = pd.read_excel(bus_file)
-            
-            # 컬럼 확인
-            st.toast(f"버스 파일 읽기 성공! 컬럼: {list(df_bus.columns)}", icon="✅")
-            
-            # X, Y 컬럼 찾기 (대소문자, 한글 모두 대응)
-            x_col = next((c for c in ['X', 'x', '경도', 'lon'] if c in df_bus.columns), None)
-            y_col = next((c for c in ['Y', 'y', '위도', 'lat'] if c in df_bus.columns), None)
+    # 3. 버스 (엔진 지정)
+    try:
+        df_bus = pd.read_excel('./data/GGD_StationInfo_M.xlsx', engine='openpyxl').dropna(subset=['X', 'Y'])
+        geom = [Point(xy) for xy in zip(df_bus['X'], df_bus['Y'])]
+        gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
+        joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
+        cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
+        
+        gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+        gdf = gdf.merge(cnt, on='자치구명', how='left')
+        gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+        gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+    except: pass
 
-            if x_col and y_col:
-                df_bus = df_bus.dropna(subset=[x_col, y_col])
-                
-                # 좌표계 검사 (값이 180보다 크면 위경도가 아님)
-                sample_val = df_bus[x_col].iloc[0]
-                if sample_val > 180:
-                    st.error(f"⚠️ [버스] 좌표계 오류! 좌표값이 위도/경도가 아닙니다. (값: {sample_val})\n해결책: 엑셀 파일의 좌표를 '위도/경도(WGS84)'로 변환해야 합니다.")
-                else:
-                    geom = [Point(xy) for xy in zip(df_bus[x_col], df_bus[y_col])]
-                    gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
-                    joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
-                    cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
-                    
-                    gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
-                    gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
-                    gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-            else:
-                st.error(f"⚠️ [버스] 엑셀 파일에 'X', 'Y' (또는 경도, 위도) 컬럼이 없습니다.\n현재 컬럼 목록: {list(df_bus.columns)}")
-        except Exception as e:
-            st.error(f"⚠️ [버스] 파일 읽기 실패: {e}\n(Tip: requirements.txt에 openpyxl이 있는지 확인하세요!)")
-    else:
-        # 파일이 없을 때 경고 안 뜨게 하려면 아래 줄 주석 처리
-        # st.warning(f"버스 데이터 파일이 없습니다: {bus_file}")
-        pass
-
-    # ==============================================================================
-    # 4. [진단] 지하철 데이터 (에러 원인 출력)
-    # ==============================================================================
+    # 4. 지하철 (에러 수정됨: engine='openpyxl' 추가)
     subway_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
     if subway_files:
-        target_file = subway_files[0]
-        f_path = os.path.join('./data', target_file)
         try:
-            if f_path.endswith('.csv'): df_sub = pd.read_csv(f_path, encoding='cp949')
-            else: df_sub = pd.read_excel(f_path)
+            f_path = os.path.join('./data', subway_files[0])
             
+            # CSV면 그냥 읽고, 아니면 엑셀로 간주하고 엔진 지정
+            if f_path.lower().endswith('.csv'):
+                try: df_sub = pd.read_csv(f_path, encoding='cp949')
+                except: df_sub = pd.read_csv(f_path, encoding='utf-8')
+            else:
+                # [여기가 핵심 수정] engine='openpyxl'을 꼭 넣어야 함
+                df_sub = pd.read_excel(f_path, engine='openpyxl')
+            
+            # 좌표 컬럼 찾기
             x_col = next((c for c in ['경도', 'X', 'lon', 'x'] if c in df_sub.columns), None)
             y_col = next((c for c in ['위도', 'Y', 'lat', 'y'] if c in df_sub.columns), None)
 
@@ -120,7 +98,7 @@ def load_and_merge_data():
                 gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
                 gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
             else:
-                st.error(f"⚠️ [지하철] 파일({target_file})에 좌표 컬럼(X/Y 또는 경도/위도)이 없습니다.")
+                st.error(f"⚠️ [지하철] 파일에 '경도/위도' 또는 'X/Y' 컬럼이 없습니다.")
         except Exception as e:
             st.error(f"⚠️ [지하철] 데이터 로드 실패: {e}")
 
@@ -149,7 +127,7 @@ def load_and_merge_data():
     return gdf
 
 # --------------------------------------------------------------------------
-# 3. 화면 구성 (평균선 + 툴팁 수정 유지)
+# 3. 화면 구성 및 시각화
 # --------------------------------------------------------------------------
 gdf = load_and_merge_data()
 
@@ -181,8 +159,9 @@ if gdf is not None:
                 center_lat, center_lon = map_data.geometry.centroid.y.values[0], map_data.geometry.centroid.x.values[0]
                 zoom = 11.0
             colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
+            
             fig = px.choropleth_mapbox(
-                gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
+                map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
                 color=selected_col, mapbox_style="carto-positron", zoom=zoom,
                 center={"lat": center_lat, "lon": center_lon}, opacity=0.6,
                 hover_name='자치구명', color_continuous_scale=colorscale
@@ -201,6 +180,7 @@ if gdf is not None:
             if '부족' in selected_col: ascending = not ascending
             df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
             df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
+            
             fig_bar = px.bar(
                 df_sorted, x='자치구명', y=selected_col, text=selected_col, 
                 color='color', color_discrete_map='identity'
