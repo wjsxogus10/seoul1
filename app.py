@@ -28,7 +28,7 @@ def load_and_merge_data():
         elif 'SIG_KOR_NM' in gdf.columns: gdf = gdf.rename(columns={'SIG_KOR_NM': '자치구명'})
         gdf_area = gdf.to_crs(epsg=5179)
         gdf['면적(km²)'] = gdf_area.geometry.area / 1_000_000
-        data_info['지도'] = {'file': 'seoul_municipalities_geo_simple.json', 'status': '✅', 'desc': '서울시 행정구역 경계'}
+        data_info['지도'] = {'file': 'seoul_municipalities_geo_simple.json', 'status': '✅'}
     except Exception as e:
         return None, [f"❌ 지도 로드 실패: {e}"], {}
 
@@ -45,9 +45,9 @@ def load_and_merge_data():
         gdf = gdf.merge(grp, on='자치구명', how='left')
         gdf['총_상주인구_수'] = gdf['총_상주인구_수'].fillna(0)
         gdf['인구 밀도'] = gdf['총_상주인구_수'] / gdf['면적(km²)']
-        data_info['인구'] = {'file': pop_file, 'status': '✅', 'desc': '자치구별 상주인구 통계'}
+        data_info['인구'] = {'file': pop_file, 'status': '✅'}
     except: 
-        data_info['인구'] = {'file': pop_file, 'status': '❌', 'desc': '파일 없음'}
+        data_info['인구'] = {'file': pop_file, 'status': '❌'}
 
     # 2. 상권
     biz_file = '서울시 상권분석서비스(집객시설-자치구).csv'
@@ -57,9 +57,9 @@ def load_and_merge_data():
         gdf = gdf.drop(columns=['집객시설 수'], errors='ignore')
         gdf = gdf.merge(grp, on='자치구명', how='left')
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
-        data_info['상권'] = {'file': biz_file, 'status': '✅', 'desc': '자치구별 집객시설 수'}
+        data_info['상권'] = {'file': biz_file, 'status': '✅'}
     except:
-        data_info['상권'] = {'file': biz_file, 'status': '❌', 'desc': '파일 없음'}
+        data_info['상권'] = {'file': biz_file, 'status': '❌'}
 
     # 3. 버스
     bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
@@ -87,15 +87,15 @@ def load_and_merge_data():
                     gdf = gdf.merge(cnt, on='자치구명', how='left')
                     gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
                     gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-                    data_info['버스'] = {'file': bus_path, 'status': '✅', 'desc': f'좌표 매칭 완료 ({len(joined)}개)'}
+                    data_info['버스'] = {'file': bus_path, 'status': '✅'}
                 else:
-                    data_info['버스'] = {'file': bus_path, 'status': '⚠️', 'desc': '좌표계 오류 (위경도 아님)'}
+                    data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
             else:
-                data_info['버스'] = {'file': bus_path, 'status': '⚠️', 'desc': '좌표 컬럼 없음'}
-        except Exception as e:
-            data_info['버스'] = {'file': bus_path, 'status': '❌', 'desc': str(e)}
+                data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
+        except:
+            data_info['버스'] = {'file': bus_path, 'status': '❌'}
     else:
-        data_info['버스'] = {'file': '없음', 'status': '❌', 'desc': '파일 없음'}
+        data_info['버스'] = {'file': '없음', 'status': '❌'}
 
     # 4. 지하철
     sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
@@ -117,7 +117,7 @@ def load_and_merge_data():
                 cols = ['자치구명', '지하철역_수']
                 if '지하철역 밀도' in df_sub.columns: cols.append('지하철역 밀도')
                 gdf = gdf.merge(df_sub[cols], on='자치구명', how='left')
-                data_info['지하철'] = {'file': sub_path, 'status': '✅', 'desc': '통계 데이터 병합'}
+                data_info['지하철'] = {'file': sub_path, 'status': '✅'}
             else:
                 x_c = next((c for c in ['경도', 'X', 'x'] if c in df_sub.columns), None)
                 y_c = next((c for c in ['위도', 'Y', 'y'] if c in df_sub.columns), None)
@@ -129,9 +129,9 @@ def load_and_merge_data():
                     cnt = joined.groupby('자치구명').size().reset_index(name='지하철역_수')
                     gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                     gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    data_info['지하철'] = {'file': sub_path, 'status': '✅', 'desc': f'좌표 매칭 완료 ({len(joined)}개)'}
+                    data_info['지하철'] = {'file': sub_path, 'status': '✅'}
                 else:
-                    data_info['지하철'] = {'file': sub_path, 'status': '⚠️', 'desc': '컬럼 오류'}
+                    data_info['지하철'] = {'file': sub_path, 'status': '⚠️'}
             
             gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
             if '지하철역 밀도' not in gdf.columns:
@@ -139,10 +139,10 @@ def load_and_merge_data():
             else:
                 gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
 
-        except Exception as e:
-            data_info['지하철'] = {'file': sub_path, 'status': '❌', 'desc': str(e)}
+        except:
+            data_info['지하철'] = {'file': sub_path, 'status': '❌'}
     else:
-        data_info['지하철'] = {'file': '없음', 'status': '❌', 'desc': '파일 없음'}
+        data_info['지하철'] = {'file': '없음', 'status': '❌'}
 
     # 5. 통계
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
@@ -237,7 +237,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         )
         
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="green")
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
@@ -334,14 +334,10 @@ with st.expander("📚 사용된 데이터 출처 보기", expanded=False):
     
     source_list = []
     for cat, info in data_info.items():
-        # [핵심] 에러가 났던 부분 수정: .get()으로 안전하게 가져옴
-        desc_text = info.get('desc', info.get('msg', '정보 없음'))
-        
         source_list.append({
             "데이터 종류": cat,
             "상태": info.get('status', '❓'),
-            "파일명": info.get('file', '-'),
-            "비고": desc_text
+            "파일명": info.get('file', '-')
         })
     
     df_source = pd.DataFrame(source_list)
