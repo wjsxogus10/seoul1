@@ -221,7 +221,7 @@ if valid_metrics:
         fig_bar.add_hline(
             y=avg_val, 
             line_dash="dash", 
-            line_color="green", 
+            line_color="red", 
             annotation_text=f"평균: {avg_val:,.2f}", 
             annotation_position="top right"
         )
