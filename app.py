@@ -182,10 +182,10 @@ if valid_metrics:
     selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
     # ----------------------------------------------------------------------
-    # [공통] 색상 테마 결정
+    # [핵심] 색상 및 테마 설정
     # ----------------------------------------------------------------------
     if '부족' in selected_col: 
-        colorscale = 'Reds_r' # 1위(부족)가 진한 빨강
+        colorscale = 'Reds_r' # 1위가 빨강 (부족함)
         bar_highlight_color = '#FF4B4B'
     elif '밀도' in selected_col: 
         colorscale = 'YlOrRd'
@@ -238,14 +238,14 @@ if valid_metrics:
             color=selected_col, color_continuous_scale=colorscale
         )
         
-        # [수정됨] 평균선 -> 초록색(green)으로 변경
+        # [핵심 수정] 평균선 -> 흰색(White) for Dark Mode
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
         fig_bar.add_hline(
             y=avg_val, 
             line_dash="dash", 
-            line_color="green",  # <--- 초록색 변경
+            line_color="white",  # <--- 흰색
             annotation_text=f"평균: {avg_val:{avg_fmt}}", 
-            annotation_font_color="green" # <--- 초록색 변경
+            annotation_font_color="white" # <--- 흰색
         )
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
@@ -298,7 +298,7 @@ if valid_metrics:
                 fig_d.add_trace(
                     px.choropleth_mapbox(
                         district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
-                        color_discrete_sequence=[bar_highlight_color], opacity=0.8
+                        color_discrete_sequence=[bar_highlight_color], opacity=0.9
                     ).data[0]
                 )
                 fig_d.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=400, showlegend=False, coloraxis_showscale=False)
@@ -318,7 +318,7 @@ if valid_metrics:
                 
                 fig_comp = px.bar(
                     df_comp, x='구분', y='값', color='색상',
-                    color_discrete_map={'My': bar_highlight_color, 'Avg': 'gray'},
+                    color_discrete_map={'My': bar_highlight_color, 'Avg': 'lightgray'},
                     text='값'
                 )
                 
