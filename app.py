@@ -30,7 +30,7 @@ def load_and_merge_data():
         st.error(f"지도 로드 실패: {e}")
         return None
 
-    # [B] 사용자 데이터 병합 (기본값 0 설정)
+    # [B] 사용자 데이터 병합
     cols_init = [
         '총_상주인구_수', '인구 밀도', '집객시설 수', 
         '버스정류장_수', '버스정류장 밀도', 
@@ -59,40 +59,28 @@ def load_and_merge_data():
         gdf['집객시설 수'] = gdf['집객시설_수'].fillna(0)
     except: pass
 
-    # ======================================================================
-    # 3. [수정] 버스 데이터 (CSV/Excel 자동 감지 및 로드 강화)
-    # ======================================================================
-    # 파일명에 'Station'이나 '버스'가 포함된 파일 찾기
+    # 3. 버스
     bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
-    
     if bus_files:
         bus_path = os.path.join('./data', bus_files[0])
         try:
-            # 1. 파일 형식에 따라 읽기
             if bus_path.lower().endswith('.csv'):
                 try: df_bus = pd.read_csv(bus_path, encoding='cp949')
                 except: df_bus = pd.read_csv(bus_path, encoding='utf-8')
             else:
                 df_bus = pd.read_excel(bus_path, engine='openpyxl')
 
-            # 2. 컬럼명 유연하게 찾기
             x_candidates = ['X', 'x', '경도', 'lon', 'LON', '좌표X']
             y_candidates = ['Y', 'y', '위도', 'lat', 'LAT', '좌표Y']
-            
             x_col = next((c for c in x_candidates if c in df_bus.columns), None)
             y_col = next((c for c in y_candidates if c in df_bus.columns), None)
 
             if x_col and y_col:
                 df_bus = df_bus.dropna(subset=[x_col, y_col])
-                
-                # 3. 좌표계 확인 (WGS84 위경도인지 체크)
                 if df_bus[x_col].iloc[0] <= 180:
                     geom = [Point(xy) for xy in zip(df_bus[x_col], df_bus[y_col])]
                     gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
-                    
-                    # 4. 서울시 지도와 공간 조인 (서울시 내부에 있는 정류장만 필터링)
                     joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
-                    
                     if not joined.empty:
                         cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
                         gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
@@ -121,7 +109,6 @@ def load_and_merge_data():
                 cols_use = ['자치구명', '지하철역_수']
                 if '지하철역 밀도' in df_sub.columns: cols_use.append('지하철역 밀도')
                 gdf = gdf.merge(df_sub[cols_use], on='자치구명', how='left')
-                
                 gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
                 if '지하철역 밀도' not in gdf.columns:
                     gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
@@ -193,24 +180,54 @@ if valid_metrics:
     district_list = ['전체 서울시'] + sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
-    # ======================================================================
-    # CASE A: 전체 서울시 보기 (비교 분석)
-    # ======================================================================
-    if selected_district == '전체 서울시':
-        # [지도]
+    # -----------------------------------------------------------
+    # [1] 요약 리포트
+    # -----------------------------------------------------------
+    if selected_district != '전체 서울시':
+        try:
+            st.markdown(f"### 📍 **{selected_district}** 상세 요약")
+            target_row = gdf[gdf['자치구명'] == selected_district].iloc[0]
+            c1, c2, c3, c4 = st.columns(4)
+            pop_val = target_row.get('총 상주인구 수 (명)', 0)
+            area_val = target_row.get('면적 (km²)', 0)
+            ratio_val = target_row.get('인구 대비 교통수단 비율 (개/명)', 0)
+            rank_val = target_row.get('교통 부족 순위 (위)', 0)
+            total_trans = target_row.get('총_교통수단_수', 0)
+            avg_ratio = gdf['인구 대비 교통수단 비율 (개/명)'].mean() if '인구 대비 교통수단 비율 (개/명)' in gdf.columns else 0
+            diff = ratio_val - avg_ratio
+            with c1: st.metric("총 인구", f"{pop_val:,.0f}명")
+            with c2: st.metric("면적", f"{area_val:.2f}km²")
+            with c3: st.metric("교통 비율", f"{ratio_val:.4f}", delta=f"{diff:.4f}")
+            with c4: st.metric("부족 순위", f"{rank_val:.0f}위")
+            st.info(f"💡 **{selected_district}**의 대중교통 시설 합계: **{int(total_trans)}개**")
+            st.markdown("---")
+        except: pass
+
+    # -----------------------------------------------------------
+    # [2] 지도
+    # -----------------------------------------------------------
+    col_map, col_chart = st.columns([1, 1])
+
+    with col_map:
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
+        center_lat, center_lon, zoom = 37.5665, 126.9780, 9.5
+        map_data = gdf.copy()
+        if selected_district != '전체 서울시':
+            map_data = gdf[gdf['자치구명'] == selected_district]
+            if not map_data.empty:
+                center_lat = map_data.geometry.centroid.y.values[0]
+                center_lon = map_data.geometry.centroid.x.values[0]
+                zoom = 11.0
         
-        # 색상 설정
-        if '부족' in selected_col: colorscale = 'Reds_r' # 1위(부족)가 진한 빨강
-        elif '밀도' in selected_col: colorscale = 'Oranges'
+        if '부족' in selected_col: colorscale = 'Reds_r'
+        elif '밀도' in selected_col: colorscale = 'YlOrRd'
         elif '인구' in selected_col: colorscale = 'Blues'
-        elif '개)' in selected_col: colorscale = 'Greens' # 시설 수
         else: colorscale = 'Viridis'
 
         fig = px.choropleth_mapbox(
-            gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
-            color=selected_col, mapbox_style="carto-positron", zoom=9.5,
-            center={"lat": 37.5665, "lon": 126.9780}, opacity=0.6,
+            map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
+            color=selected_col, mapbox_style="carto-positron", zoom=zoom,
+            center={"lat": center_lat, "lon": center_lon}, opacity=0.6,
             hover_name='자치구명', color_continuous_scale=colorscale
         )
         is_float = '밀도' in selected_col or '비율' in selected_col
@@ -219,116 +236,45 @@ if valid_metrics:
         fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("---")
-
-        # [그래프]
-        st.subheader(f"📊 {selected_col} 자치구별 순위")
+    # -----------------------------------------------------------
+    # [3] 그래프 (평균선 흰색 변경)
+    # -----------------------------------------------------------
+    with col_chart:
+        st.subheader(f"📊 {selected_col} 순위 비교")
         avg_val = gdf[selected_col].mean()
-        
-        col_opt1, col_opt2 = st.columns([1, 4])
-        with col_opt1:
-            sort_opt = st.radio("정렬:", ["상위", "하위"], horizontal=True)
-        
+        sort_opt = st.radio("정렬 기준:", ["상위", "하위"], horizontal=True, key="sort_chart")
         ascending = True if sort_opt == "하위" else False
         if '부족' in selected_col: ascending = not ascending
-
         df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
+        
+        # 색상 로직: 선택된 곳은 빨강, 나머지는 연한 회색
+        df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#E0E0E0')
         
         fig_bar = px.bar(
             df_sorted, x='자치구명', y=selected_col, text=selected_col, 
-            color=selected_col, color_continuous_scale=colorscale
+            color='color', color_discrete_map='identity'
         )
         
+        # [핵심 수정] 평균선 흰색(White)으로 변경
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        
-        # [핵심 수정] 평균선 검은색으로 변경
         fig_bar.add_hline(
             y=avg_val, 
             line_dash="dash", 
-            line_color="black", # <--- 검은색 변경
-            annotation_text=f"서울시 평균: {avg_val:{avg_fmt}}", 
-            annotation_font_color="black" # <--- 텍스트도 검은색
+            line_color="white", # 흰색 선
+            annotation_text=f"평균: {avg_val:{avg_fmt}}", 
+            annotation_font_color="white" # 흰색 글씨
         )
         
+        # 그래프 막대 위 글씨는 검정색으로 유지 (배경이 회색이므로 검정이 잘 보임)
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
-        fig_bar.update_traces(texttemplate=fmt, textposition='outside')
-        fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
+        fig_bar.update_traces(
+            texttemplate=fmt, 
+            textposition='outside',
+            textfont=dict(color='black', size=13),
+            cliponaxis=False
+        )
+        fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":30,"l":0,"b":0})
         st.plotly_chart(fig_bar, use_container_width=True)
-
-    # ======================================================================
-    # CASE B: 특정 자치구 상세 리포트
-    # ======================================================================
-    else:
-        st.markdown(f"## 📍 {selected_district} 상세 분석 리포트")
-        st.markdown("---")
-        
-        try:
-            target_row = gdf[gdf['자치구명'] == selected_district].iloc[0]
-            
-            c1, c2, c3, c4 = st.columns(4)
-            pop_val = target_row.get('총 상주인구 수 (명)', 0)
-            area_val = target_row.get('면적 (km²)', 0)
-            ratio_val = target_row.get('인구 대비 교통수단 비율 (개/명)', 0)
-            rank_val = target_row.get('교통 부족 순위 (위)', 0)
-            
-            avg_ratio = gdf['인구 대비 교통수단 비율 (개/명)'].mean() if '인구 대비 교통수단 비율 (개/명)' in gdf.columns else 0
-            diff = ratio_val - avg_ratio
-
-            with c1: st.metric("총 인구", f"{pop_val:,.0f}명")
-            with c2: st.metric("면적", f"{area_val:.2f}km²")
-            with c3: st.metric("1인당 교통비율", f"{ratio_val:.4f}", delta=f"{diff:.4f} (평균 대비)")
-            with c4: st.metric("교통 부족 순위", f"{rank_val:.0f}위", help="1위에 가까울수록 개선이 시급합니다.")
-            
-            st.markdown("---")
-
-            col_d1, col_d2 = st.columns([1, 1])
-            
-            with col_d1:
-                st.subheader(f"🗺️ {selected_district} 위치")
-                district_geo = gdf[gdf['자치구명'] == selected_district]
-                center_lat = district_geo.geometry.centroid.y.values[0]
-                center_lon = district_geo.geometry.centroid.x.values[0]
-                
-                fig_d = px.choropleth_mapbox(
-                    gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
-                    color=selected_col, mapbox_style="carto-positron", zoom=11,
-                    center={"lat": center_lat, "lon": center_lon}, opacity=0.3,
-                    hover_name='자치구명', color_continuous_scale='Greys'
-                )
-                fig_d.add_trace(
-                    px.choropleth_mapbox(
-                        district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
-                        color_discrete_sequence=['red'], opacity=0.8
-                    ).data[0]
-                )
-                fig_d.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=400, showlegend=False)
-                st.plotly_chart(fig_d, use_container_width=True)
-
-            with col_d2:
-                st.subheader(f"📊 {selected_col} : 우리 구 vs 서울시 평균")
-                
-                my_val = target_row[selected_col]
-                avg_val = gdf[selected_col].mean()
-                
-                df_comp = pd.DataFrame({
-                    '구분': [selected_district, '서울시 평균'],
-                    '값': [my_val, avg_val],
-                    '색상': ['My', 'Avg']
-                })
-                
-                fig_comp = px.bar(
-                    df_comp, x='구분', y='값', color='색상',
-                    color_discrete_map={'My': '#FF4B4B', 'Avg': 'gray'},
-                    text='값'
-                )
-                
-                fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
-                fig_comp.update_traces(texttemplate=fmt, textposition='outside')
-                fig_comp.update_layout(showlegend=False, margin={"r":0,"t":20,"l":0,"b":0}, height=400)
-                st.plotly_chart(fig_comp, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"상세 정보를 표시하는 중 오류가 발생했습니다: {e}")
 
 else:
     st.warning("분석할 데이터 파일이 없어 지도만 표시됩니다.")
