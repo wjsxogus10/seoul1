@@ -43,11 +43,11 @@ def load_and_merge_data():
     # 1. 상주 인구
     try:
         df_pop = pd.read_csv('./data/서울시 상권분석서비스(상주인구-자치구).csv', encoding='cp949')
-        grp = df_pop.groupby('자치구_코드_명')['총 상주인구 수'].mean().reset_index().rename(columns={'자치구_코드_명':'자치구명'})
-        gdf = gdf.drop(columns=['총 상주인구 수', '인구 밀도'], errors='ignore')
+        grp = df_pop.groupby('자치구_코드_명')['총_상주인구_수'].mean().reset_index().rename(columns={'자치구_코드_명':'자치구명'})
+        gdf = gdf.drop(columns=['총_상주인구_수', '인구 밀도'], errors='ignore')
         gdf = gdf.merge(grp, on='자치구명', how='left')
-        gdf['총 상주인구 수'] = gdf['총 상주인구 수'].fillna(0)
-        gdf['인구 밀도'] = gdf['총 상주인구 수'] / gdf['면적(km²)']
+        gdf['총_상주인구_수'] = gdf['총_상주인구_수'].fillna(0)
+        gdf['인구 밀도'] = gdf['총_상주인구_수'] / gdf['면적(km²)']
     except: pass
 
     # 2. 집객시설 수
@@ -143,7 +143,7 @@ st.sidebar.header("🔍 분석 옵션")
 
 # [NEW] 요청하신 순서와 메트릭 이름
 metrics_order = [
-    ('상주 인구', '총 상주인구 수'),
+    ('상주 인구', '총_상주인구_수'),
     ('인구 밀도', '인구 밀도'),
     ('집객시설 수', '집객시설_수'),
     ('버스정류장 밀도', '버스정류장 밀도'),
