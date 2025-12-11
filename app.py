@@ -176,35 +176,34 @@ valid_metrics = [m for m in metrics_order if m in gdf.columns]
 if valid_metrics:
     selected_col = st.sidebar.radio("분석할 지표 선택", valid_metrics)
     st.sidebar.markdown("---")
+    display_count = st.sidebar.slider("📊 그래프 표시 개수", 5, 25, 10)
+    st.sidebar.markdown("---")
     district_list = ['전체 서울시'] + sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
     # ----------------------------------------------------------------------
-    # [공통] 색상 테마 결정 (지도 & 그래프 공통 사용)
+    # [공통] 색상 테마 결정
     # ----------------------------------------------------------------------
     if '부족' in selected_col: 
-        colorscale = 'Reds_r' # 부족 순위 (1등이 빨강)
-        bar_highlight_color = '#FF4B4B' # 상세 비교 시 '내 구역' 색상
+        colorscale = 'Reds_r' # 1위(부족)가 진한 빨강
+        bar_highlight_color = '#FF4B4B'
     elif '밀도' in selected_col: 
         colorscale = 'YlOrRd'
-        bar_highlight_color = '#FF8C00' # Orange
+        bar_highlight_color = '#FF8C00'
     elif '인구' in selected_col: 
         colorscale = 'Blues'
-        bar_highlight_color = '#1f77b4' # Blue
+        bar_highlight_color = '#1f77b4'
     elif '개)' in selected_col: 
-        colorscale = 'Greens' # 시설 수
-        bar_highlight_color = '#2ca02c' # Green
+        colorscale = 'Greens' 
+        bar_highlight_color = '#2ca02c'
     else: 
         colorscale = 'Viridis'
         bar_highlight_color = '#440154'
 
     # ======================================================================
-    # CASE A: 전체 서울시 보기 (비교 분석)
+    # CASE A: 전체 서울시 보기
     # ======================================================================
     if selected_district == '전체 서울시':
-        display_count = st.sidebar.slider("📊 그래프 표시 개수", 5, 25, 10)
-        
-        # [1] 지도 (전체)
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
         
         fig = px.choropleth_mapbox(
@@ -216,12 +215,12 @@ if valid_metrics:
         is_float = '밀도' in selected_col or '비율' in selected_col
         num_format = ",.4f" if is_float else ",.0f"
         fig.update_traces(hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>")
-        fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500, coloraxis_showscale=True)
+        fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
 
-        # [2] 그래프 (색상을 지도와 통일)
+        # [그래프]
         st.subheader(f"📊 {selected_col} 자치구별 순위")
         avg_val = gdf[selected_col].mean()
         
@@ -234,28 +233,28 @@ if valid_metrics:
 
         df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
         
-        # [핵심] 그래프 색상을 지도 값과 똑같이 만듦 (color=selected_col)
         fig_bar = px.bar(
             df_sorted, x='자치구명', y=selected_col, text=selected_col, 
-            color=selected_col, # 값에 따라 색상 자동 지정
-            color_continuous_scale=colorscale # 지도와 같은 컬러 스케일 사용
+            color=selected_col, color_continuous_scale=colorscale
         )
         
-        # 평균선 (흰색)
+        # [수정됨] 평균선 -> 초록색(green)으로 변경
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
+        fig_bar.add_hline(
+            y=avg_val, 
+            line_dash="dash", 
+            line_color="green",  # <--- 초록색 변경
+            annotation_text=f"평균: {avg_val:{avg_fmt}}", 
+            annotation_font_color="green" # <--- 초록색 변경
+        )
         
-        # 텍스트 포맷
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
-        fig_bar.update_layout(
-            showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0},
-            coloraxis_showscale=False # 그래프 옆에는 색상바 숨김 (깔끔하게)
-        )
+        fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0}, coloraxis_showscale=False)
         st.plotly_chart(fig_bar, use_container_width=True)
 
     # ======================================================================
-    # CASE B: 특정 자치구 상세 리포트
+    # CASE B: 상세 리포트
     # ======================================================================
     else:
         st.markdown(f"## 📍 {selected_district} 상세 분석 리포트")
@@ -296,7 +295,6 @@ if valid_metrics:
                     center={"lat": center_lat, "lon": center_lon}, opacity=0.3,
                     hover_name='자치구명', color_continuous_scale=colorscale
                 )
-                # 선택된 구 강조
                 fig_d.add_trace(
                     px.choropleth_mapbox(
                         district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
