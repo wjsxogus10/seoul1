@@ -70,7 +70,7 @@ def load_and_merge_data():
             gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
     except: pass
 
-    # 4. 지하철 (결과 파일 우선 로드)
+    # 4. 지하철
     subway_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
     if subway_files:
         try:
@@ -162,9 +162,40 @@ if gdf is not None:
         district_list = ['전체 서울시'] + sorted(gdf['자치구명'].unique().tolist())
         selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
+        # ------------------------------------------------------------------
+        # [NEW] 선택한 자치구 요약 리포트 (Card View)
+        # ------------------------------------------------------------------
+        if selected_district != '전체 서울시':
+            st.markdown(f"### 📍 **{selected_district}** 상세 요약 리포트")
+            
+            # 해당 자치구 데이터 추출
+            target_row = gdf[gdf['자치구명'] == selected_district].iloc[0]
+            
+            # 4개의 컬럼으로 정보 표시
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(label="총 인구", value=f"{target_row['총 상주인구 수 (명)']:,.0f}명")
+            with c2:
+                st.metric(label="면적", value=f"{target_row['면적 (km²)']:.2f}km²")
+            with c3:
+                # 평균과 비교 (Delta)
+                my_val = target_row['인구 대비 교통수단 비율 (개/명)']
+                avg_val = gdf['인구 대비 교통수단 비율 (개/명)'].mean()
+                diff = my_val - avg_val
+                st.metric(label="인구 대비 교통 비율", value=f"{my_val:.4f}", delta=f"{diff:.4f} (평균 대비)")
+            with c4:
+                # 순위 (Rank)
+                rank = int(target_row['교통 부족 순위 (위)'])
+                st.metric(label="교통 부족 순위", value=f"{rank}위", help="1위에 가까울수록 교통시설이 부족합니다.")
+            
+            st.info(f"💡 **{selected_district}**의 대중교통(버스+지하철) 시설은 총 **{int(target_row.get('총_교통수단_수', 0))}개** 입니다.")
+            st.markdown("---")
+
+        # ------------------------------------------------------------------
+        # 지도 및 그래프 영역
+        # ------------------------------------------------------------------
         col_map, col_chart = st.columns([1, 1])
 
-        # [지도]
         with col_map:
             st.subheader(f"🗺️ 서울시 {selected_col} 지도")
             center_lat, center_lon, zoom = 37.5665, 126.9780, 9.5
@@ -174,24 +205,18 @@ if gdf is not None:
                 center_lat, center_lon = map_data.geometry.centroid.y.values[0], map_data.geometry.centroid.x.values[0]
                 zoom = 11.0
             colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
-            
             fig = px.choropleth_mapbox(
                 map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
                 color=selected_col, mapbox_style="carto-positron", zoom=zoom,
                 center={"lat": center_lat, "lon": center_lon}, opacity=0.6,
                 hover_name='자치구명', color_continuous_scale=colorscale
             )
-            
-            # [수정] 4자리 포맷 적용 (,.4f)
-            # 정수(명, 개, 위)는 0자리, 그 외(밀도, 비율)는 4자리
-            is_integer = any(x in selected_col for x in ['명)', '개)', '위)'])
-            num_format = ",.0f" if is_integer else ",.4f"
-            
+            is_float = '밀도' in selected_col or '비율' in selected_col
+            num_format = ",.4f" if is_float else ",.0f"
             fig.update_traces(hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>")
             fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
             st.plotly_chart(fig, use_container_width=True)
 
-        # [그래프]
         with col_chart:
             st.subheader(f"📊 {selected_col} 순위 비교")
             avg_val = gdf[selected_col].mean()
@@ -206,12 +231,12 @@ if gdf is not None:
                 color='color', color_discrete_map='identity'
             )
             
-            # [수정] 평균선도 4자리 포맷 적용
-            avg_fmt = ",.0f" if is_integer else ",.4f"
+            # 평균선 (소수점 4자리)
+            avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
             fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}")
             
-            # [수정] 그래프 텍스트 4자리 포맷 적용
-            fig_bar.update_traces(texttemplate=f'%{{text:{num_format}}}', textposition='outside')
+            fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
+            fig_bar.update_traces(texttemplate=fmt, textposition='outside')
             fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
             st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -219,13 +244,8 @@ if gdf is not None:
         st.subheader("📋 상세 데이터 표")
         cols_to_show = ['자치구명'] + valid_metrics
         df_table = gdf[cols_to_show].sort_values(by=selected_col, ascending=ascending).head(display_count)
-        
-        # 표 포맷은 Streamlit에서 자동으로 처리하지만, 데이터 자체가 float이면 보이게 됨.
         st.dataframe(df_table, use_container_width=True, hide_index=True)
-        
         csv = gdf[cols_to_show].to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 전체 데이터 다운로드 (CSV)", csv, "seoul_analysis.csv", "text/csv")
     else:
         st.warning("분석할 데이터 파일이 없어 지도만 표시됩니다.")
-else:
-    st.error("데이터 로드 중 문제가 발생했습니다.")
