@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import geopandas
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 from shapely.geometry import Point
 
@@ -29,7 +30,7 @@ def load_and_merge_data():
         st.error(f"지도 로드 실패: {e}")
         return None
 
-    # [B] 사용자 데이터 병합 (기본값 0)
+    # [B] 사용자 데이터 병합
     cols_init = ['총_상주인구_수', '인구 밀도', '집객시설 수', '버스정류장_수', '버스정류장 밀도', '지하철역_수', '지하철역 밀도']
     for c in cols_init:
         if c not in gdf.columns: gdf[c] = 0
@@ -69,55 +70,41 @@ def load_and_merge_data():
             gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
     except: pass
 
-    # ==============================================================================
-    # 4. [핵심 수정] 지하철 데이터 (이미 계산된 파일도 처리하도록 개선)
-    # ==============================================================================
+    # 4. 지하철 (결과 파일 우선 로드)
     subway_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
     if subway_files:
         try:
             f_path = os.path.join('./data', subway_files[0])
-            
-            # 파일 읽기
             if f_path.lower().endswith('.csv'):
                 try: df_sub = pd.read_csv(f_path, encoding='cp949')
                 except: df_sub = pd.read_csv(f_path, encoding='utf-8')
             else:
                 df_sub = pd.read_excel(f_path, engine='openpyxl')
 
-            # [CASE A] 이미 결과가 있는 파일인 경우 (고객님 상황)
+            # [CASE A] 결과 파일 (자치구별 통계)
             if '자치구_코드_명' in df_sub.columns and '지하철역_수' in df_sub.columns:
-                # 1. 이름 통일 (자치구_코드_명 -> 자치구명)
                 df_sub = df_sub.rename(columns={'자치구_코드_명': '자치구명'})
-                
-                # 2. 밀도 컬럼 이름 찾기 ('지하철역_밀도(개/km²)' 등 복잡한 이름 대응)
                 density_col_raw = next((c for c in df_sub.columns if '밀도' in c), None)
-                if density_col_raw:
-                    df_sub = df_sub.rename(columns={density_col_raw: '지하철역 밀도'})
+                if density_col_raw: df_sub = df_sub.rename(columns={density_col_raw: '지하철역 밀도'})
                 
-                # 3. 병합 (기존 값 지우고 덮어쓰기)
                 gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
-                
                 cols_to_use = ['자치구명', '지하철역_수']
-                if '지하철역 밀도' in df_sub.columns:
-                    cols_to_use.append('지하철역 밀도')
-                
+                if '지하철역 밀도' in df_sub.columns: cols_to_use.append('지하철역 밀도')
                 gdf = gdf.merge(df_sub[cols_to_use], on='자치구명', how='left')
                 
-                # 4. 결측치 및 밀도 재계산 (혹시 모르니)
                 gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
                 if '지하철역 밀도' not in gdf.columns:
                     gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
                 else:
                     gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
 
-            # [CASE B] 좌표가 있는 파일인 경우 (기존 로직)
+            # [CASE B] 좌표 파일
             else:
                 x_col = next((c for c in ['경도', 'X', 'x', 'lon', 'POINT_X'] if c in df_sub.columns), None)
                 y_col = next((c for c in ['위도', 'Y', 'y', 'lat', 'POINT_Y'] if c in df_sub.columns), None)
-
                 if x_col and y_col:
                     df_sub = df_sub.dropna(subset=[x_col, y_col])
-                    if df_sub[x_col].iloc[0] < 180: # 좌표계 체크
+                    if df_sub[x_col].iloc[0] < 180:
                         geom = [Point(xy) for xy in zip(df_sub[x_col], df_sub[y_col])]
                         gdf_sub = geopandas.GeoDataFrame(df_sub, geometry=geom, crs="EPSG:4326")
                         joined = geopandas.sjoin(gdf_sub, gdf, how="inner", predicate="within")
@@ -129,7 +116,7 @@ def load_and_merge_data():
         except Exception as e:
             st.error(f"지하철 데이터 처리 중 오류: {e}")
 
-    # 5. 통계 및 단위 (최종 정리)
+    # 5. 통계
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
     gdf['대중교통 밀도 (면적당)'] = gdf['총_교통수단_수'] / gdf['면적(km²)']
     pop_safe = gdf['총_상주인구_수'].replace(0, 1)
@@ -153,80 +140,92 @@ def load_and_merge_data():
 
     return gdf
 
-
-
 # --------------------------------------------------------------------------
 # 3. 화면 구성 및 시각화
 # --------------------------------------------------------------------------
 gdf = load_and_merge_data()
 
-if gdf is None:
-    st.error("데이터 로드 중 문제가 발생했습니다.")
-    st.stop()
+if gdf is not None:
+    st.sidebar.header("🔍 분석 옵션")
+    metrics_order = [
+        '총 상주인구 수 (명)', '인구 밀도 (명/km²)', '집객시설 수 (개)',
+        '버스정류장 밀도 (개/km²)', '지하철역 밀도 (개/km²)', '대중교통 밀도 (개/km²)',
+        '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
+    ]
+    valid_metrics = [m for m in metrics_order if m in gdf.columns]
 
-st.sidebar.header("🔍 분석 옵션")
-metrics_order = [
-    '총 상주인구 수 (명)', '인구 밀도 (명/km²)', '집객시설 수 (개)',
-    '버스정류장 밀도 (개/km²)', '지하철역 밀도 (개/km²)', '대중교통 밀도 (개/km²)',
-    '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
-]
-valid_metrics = [m for m in metrics_order if m in gdf.columns]
+    if valid_metrics:
+        selected_col = st.sidebar.radio("분석할 지표 선택", valid_metrics)
+        st.sidebar.markdown("---")
+        display_count = st.sidebar.slider("📊 그래프/표 표시 개수", 5, 25, 10)
+        st.sidebar.markdown("---")
+        district_list = ['전체 서울시'] + sorted(gdf['자치구명'].unique().tolist())
+        selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
 
-if valid_metrics:
-    selected_col = st.sidebar.radio("분석할 지표 선택", valid_metrics)
-    st.sidebar.markdown("---")
-    display_count = st.sidebar.slider("📊 그래프/표 표시 개수", 5, 25, 10)
-    st.sidebar.markdown("---")
-    district_list = ['전체 서울시'] + sorted(gdf['자치구명'].unique().tolist())
-    selected_district = st.sidebar.selectbox("자치구 상세 보기", district_list)
+        col_map, col_chart = st.columns([1, 1])
 
-    col_map, col_chart = st.columns([1, 1])
+        # [지도]
+        with col_map:
+            st.subheader(f"🗺️ 서울시 {selected_col} 지도")
+            center_lat, center_lon, zoom = 37.5665, 126.9780, 9.5
+            map_data = gdf.copy()
+            if selected_district != '전체 서울시':
+                map_data = gdf[gdf['자치구명'] == selected_district]
+                center_lat, center_lon = map_data.geometry.centroid.y.values[0], map_data.geometry.centroid.x.values[0]
+                zoom = 11.0
+            colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
+            
+            fig = px.choropleth_mapbox(
+                map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
+                color=selected_col, mapbox_style="carto-positron", zoom=zoom,
+                center={"lat": center_lat, "lon": center_lon}, opacity=0.6,
+                hover_name='자치구명', color_continuous_scale=colorscale
+            )
+            
+            # [수정] 4자리 포맷 적용 (,.4f)
+            # 정수(명, 개, 위)는 0자리, 그 외(밀도, 비율)는 4자리
+            is_integer = any(x in selected_col for x in ['명)', '개)', '위)'])
+            num_format = ",.0f" if is_integer else ",.4f"
+            
+            fig.update_traces(hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>")
+            fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
+            st.plotly_chart(fig, use_container_width=True)
 
-    with col_map:
-        st.subheader(f"🗺️ 서울시 {selected_col} 지도")
-        center_lat, center_lon, zoom = 37.5665, 126.9780, 9.5
-        map_data = gdf.copy()
-        if selected_district != '전체 서울시':
-            map_data = gdf[gdf['자치구명'] == selected_district]
-            center_lat, center_lon = map_data.geometry.centroid.y.values[0], map_data.geometry.centroid.x.values[0]
-            zoom = 11.0
-        colorscale = 'Reds_r' if '부족' in selected_col else 'YlGnBu'
-        fig = px.choropleth_mapbox(
-            map_data, geojson=map_data.geometry.__geo_interface__, locations=map_data.index,
-            color=selected_col, mapbox_style="carto-positron", zoom=zoom,
-            center={"lat": center_lat, "lon": center_lon}, opacity=0.6,
-            hover_name='자치구명', color_continuous_scale=colorscale
-        )
-        is_float = '밀도' in selected_col or '비율' in selected_col
-        num_format = ",.4f" if is_float else ",.0f"
-        fig.update_traces(hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>")
-        fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        # [그래프]
+        with col_chart:
+            st.subheader(f"📊 {selected_col} 순위 비교")
+            avg_val = gdf[selected_col].mean()
+            sort_opt = st.radio("정렬 기준:", ["상위", "하위"], horizontal=True, key="sort_chart")
+            ascending = True if sort_opt == "하위" else False
+            if '부족' in selected_col: ascending = not ascending
+            df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
+            df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
+            
+            fig_bar = px.bar(
+                df_sorted, x='자치구명', y=selected_col, text=selected_col, 
+                color='color', color_discrete_map='identity'
+            )
+            
+            # [수정] 평균선도 4자리 포맷 적용
+            avg_fmt = ",.0f" if is_integer else ",.4f"
+            fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}")
+            
+            # [수정] 그래프 텍스트 4자리 포맷 적용
+            fig_bar.update_traces(texttemplate=f'%{{text:{num_format}}}', textposition='outside')
+            fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-    with col_chart:
-        st.subheader(f"📊 {selected_col} 순위 비교")
-        avg_val = gdf[selected_col].mean()
-        sort_opt = st.radio("정렬 기준:", ["상위", "하위"], horizontal=True, key="sort_chart")
-        ascending = True if sort_opt == "하위" else False
-        if '부족' in selected_col: ascending = not ascending
-        df_sorted = gdf.sort_values(by=selected_col, ascending=ascending).head(display_count)
-        df_sorted['color'] = df_sorted['자치구명'].apply(lambda x: '#FF4B4B' if x == selected_district else '#8884d8')
-        fig_bar = px.bar(
-            df_sorted, x='자치구명', y=selected_col, text=selected_col, 
-            color='color', color_discrete_map='identity'
-        )
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:,.2f}")
-        fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
-        fig_bar.update_traces(texttemplate=fmt, textposition='outside')
-        fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0})
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("📋 상세 데이터 표")
-    cols_to_show = ['자치구명'] + valid_metrics
-    df_table = gdf[cols_to_show].sort_values(by=selected_col, ascending=ascending).head(display_count)
-    st.dataframe(df_table, use_container_width=True, hide_index=True)
-    csv = gdf[cols_to_show].to_csv(index=False).encode('utf-8-sig')
-    st.download_button("📥 전체 데이터 다운로드 (CSV)", csv, "seoul_analysis.csv", "text/csv")
+        st.markdown("---")
+        st.subheader("📋 상세 데이터 표")
+        cols_to_show = ['자치구명'] + valid_metrics
+        df_table = gdf[cols_to_show].sort_values(by=selected_col, ascending=ascending).head(display_count)
+        
+        # 표 포맷은 Streamlit에서 자동으로 처리하지만, 데이터 자체가 float이면 보이게 됨.
+        st.dataframe(df_table, use_container_width=True, hide_index=True)
+        
+        csv = gdf[cols_to_show].to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 전체 데이터 다운로드 (CSV)", csv, "seoul_analysis.csv", "text/csv")
+    else:
+        st.warning("분석할 데이터 파일이 없어 지도만 표시됩니다.")
 else:
-    st.warning("분석할 데이터 파일이 없어 지도만 표시됩니다.")
+    st.error("데이터 로드 중 문제가 발생했습니다.")
