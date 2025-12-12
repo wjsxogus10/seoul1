@@ -17,7 +17,7 @@ st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보�
 @st.cache_data
 def load_and_merge_data():
     logs = []
-    data_info = {} 
+    data_info = {}
 
     # [A] 지도 데이터
     map_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
@@ -206,26 +206,31 @@ if page_mode == "🏙️ 서울시 전체 분석":
 
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
         
-        # [툴팁 설정] 전체 지도에서도 상세 정보를 다 보여줌
-        hover_data_cols = {
-            '총 상주인구 수 (명)': ':.0f',
-            '면적 (km²)': ':.2f',
-            '버스정류장 수 (개)': ':.0f',
-            '지하철역 수 (개)': ':.0f',
-            '인구 대비 교통수단 비율 (개/명)': ':.4f',
-            '교통 부족 순위 (위)': ':.0f'
-        }
-        # 실제로 존재하는 컬럼만 필터링
-        hover_data_clean = {k:v for k,v in hover_data_cols.items() if k in gdf.columns}
+        # [툴팁 설정] 전체 지도 - 컬럼 목록 명시
+        hover_data_cols = [
+            '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
+            '버스정류장 수 (개)', '지하철역 수 (개)', '인구 대비 교통수단 비율 (개/명)'
+        ]
+        # 실제 존재하는 컬럼만 필터링
+        final_hover_cols = [c for c in hover_data_cols if c in gdf.columns]
 
         fig = px.choropleth_mapbox(
             gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
             color=selected_col, mapbox_style="carto-positron", zoom=9.5,
             center={"lat": 37.5665, "lon": 126.9780}, opacity=0.6,
             hover_name='자치구명', 
-            hover_data=hover_data_clean, # 툴팁 데이터 추가
+            hover_data=final_hover_cols, # 데이터를 명시적으로 전달
             color_continuous_scale=colorscale
         )
+        
+        # [핵심 수정] 툴팁 문법 간소화 (문자열 충돌 방지)
+        # %{customdata[0]} 은 hover_data의 첫번째 컬럼(자치구명)을 의미
+        fig.update_traces(
+            hovertemplate="<b>%{customdata[0]}</b><br>" + 
+                          f"{selected_col}: %{{z}}<br>" + 
+                          "<extra></extra>"
+        )
+        
         fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -285,25 +290,27 @@ else:
         with c3: st.metric("🚌 교통 비율", f"{ratio_val:.4f}", delta=f"{diff:.4f} (평균 대비)")
         with c4: st.metric("🚨 부족 순위", f"{rank_val:.0f}위", help="1위에 가까울수록 개선이 시급함")
         
+        total_trans = target_row.get('총_교통수단_수', 0)
+        st.info(f"ℹ️ **{selected_district}**에는 총 **{int(total_trans)}개**의 대중교통 시설(버스+지하철)이 있습니다.")
+        
         st.markdown("---")
 
         col_d1, col_d2 = st.columns([1, 1])
         
         with col_d1:
             st.subheader(f"🗺️ {selected_district} 상세 지도")
-            st.caption("💡 지도에 마우스를 올리면 상세 정보를 볼 수 있습니다.")
+            st.caption("💡 지도에 마우스를 올리면 상세 정보가 나옵니다.")
             
             district_geo = gdf[gdf['자치구명'] == selected_district]
             center_lat = district_geo.geometry.centroid.y.values[0]
             center_lon = district_geo.geometry.centroid.x.values[0]
             
-            # [핵심 수정] 툴팁에 보여줄 데이터 정의
+            # [상세 지도 툴팁] 모든 정보 포함
             hover_cols = [
                 '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
                 '버스정류장 수 (개)', '지하철역 수 (개)', 
                 '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
             ]
-            # 실제 존재하는 컬럼만 선택
             valid_hover = [c for c in hover_cols if c in gdf.columns]
 
             fig_d = px.choropleth_mapbox(
@@ -311,13 +318,14 @@ else:
                 color='교통 부족 순위 (위)', mapbox_style="carto-positron", zoom=11,
                 center={"lat": center_lat, "lon": center_lon}, opacity=0.1,
                 hover_name='자치구명', 
-                hover_data=valid_hover, # 모든 상세 데이터 삽입
+                hover_data=valid_hover, # 툴팁 데이터 전달
                 color_continuous_scale='Reds_r'
             )
             
-            # 툴팁 디자인 커스터마이징 (깔끔하게 줄바꿈)
+            # [핵심] 상세 지도 툴팁 디자인
+            # customdata[0] = 자치구명, [1] = 인구, [2] = 면적 ... (hover_data 순서대로)
             fig_d.update_traces(
-                hovertemplate="<b>%{hovertext}</b><br><br>" +
+                hovertemplate="<b>%{customdata[0]}</b><br><br>" +
                 "👥 인구: %{customdata[1]:,.0f}명<br>" +
                 "🗺️ 면적: %{customdata[2]:.2f}km²<br>" +
                 "🚌 버스: %{customdata[3]:,.0f}개<br>" +
@@ -326,15 +334,16 @@ else:
                 "🚨 순위: %{customdata[6]:.0f}위<extra></extra>"
             )
 
-            fig_d.add_trace(
-                px.choropleth_mapbox(
-                    district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
-                    color_discrete_sequence=['#FF4B4B'], opacity=0.9
-                ).data[0]
-            )
-            # 하이라이트 된 부분의 툴팁도 동일하게 적용 (복사)
-            fig_d.data[1].customdata = fig_d.data[0].customdata[district_geo.index]
-            fig_d.data[1].hovertemplate = fig_d.data[0].hovertemplate
+            # 선택된 구 하이라이트 (툴팁 동일 적용)
+            highlight_trace = px.choropleth_mapbox(
+                district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
+                color_discrete_sequence=['#FF4B4B'], opacity=0.9,
+                hover_name='자치구명', hover_data=valid_hover
+            ).data[0]
+            
+            # 하이라이트 트레이스에 툴팁 서식 복사
+            highlight_trace.hovertemplate = fig_d.data[0].hovertemplate
+            fig_d.add_trace(highlight_trace)
 
             fig_d.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=400, showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig_d, use_container_width=True)
