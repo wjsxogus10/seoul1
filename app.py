@@ -9,7 +9,7 @@ from shapely.geometry import Point
 # --------------------------------------------------------------------------
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="서울시 대중교통 개선 대시보드")
+st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수
@@ -61,77 +61,89 @@ def load_and_merge_data():
     except:
         data_info['상권'] = {'file': biz_file, 'status': '❌'}
 
-    # 3. 버스
-    bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
-    if bus_files:
-        bus_path = bus_files[0]
+    # 3. 버스 (NEW: 새로운 버스 데이터 적용)
+    target_bus_file = "20250930기준_서울시정류소(정류소별).xlsx - 시내버스 정류장.csv"
+    bus_path = os.path.join('./data', target_bus_file)
+    
+    if os.path.exists(bus_path):
         try:
-            full_path = os.path.join('./data', bus_path)
-            if bus_path.lower().endswith('.csv'):
-                try: df_bus = pd.read_csv(full_path, encoding='cp949')
-                except: df_bus = pd.read_csv(full_path, encoding='utf-8')
-            else:
-                df_bus = pd.read_excel(full_path, engine='openpyxl')
+            try: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+            except: df_bus = pd.read_csv(bus_path, encoding='cp949')
 
-            x_c = next((c for c in ['X', 'x', '경도', 'lon'] if c in df_bus.columns), None)
-            y_c = next((c for c in ['Y', 'y', '위도', 'lat'] if c in df_bus.columns), None)
-
-            if x_c and y_c:
-                df_bus = df_bus.dropna(subset=[x_c, y_c])
-                if df_bus[x_c].iloc[0] <= 180:
-                    geom = [Point(xy) for xy in zip(df_bus[x_c], df_bus[y_c])]
-                    gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
-                    joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
-                    cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
-                    gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
-                    gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
-                    gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-                    data_info['버스'] = {'file': bus_path, 'status': '✅'}
-                else:
-                    data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
+            if '자치구' in df_bus.columns:
+                # 자치구별로 정류장 개수 세기
+                bus_cnt = df_bus['자치구'].value_counts().reset_index()
+                bus_cnt.columns = ['자치구명', '버스정류장_수']
+                
+                # 병합
+                gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+                gdf = gdf.merge(bus_cnt, on='자치구명', how='left')
+                
+                gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+                gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+                
+                data_info['버스'] = {'file': target_bus_file, 'status': '✅'}
             else:
-                data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
-        except:
-            data_info['버스'] = {'file': bus_path, 'status': '❌'}
+                data_info['버스'] = {'file': target_bus_file, 'status': '⚠️ 컬럼 오류'}
+        except Exception as e:
+            data_info['버스'] = {'file': target_bus_file, 'status': '❌', 'desc': str(e)}
     else:
-        data_info['버스'] = {'file': '없음', 'status': '❌'}
+        # 파일이 없을 경우 기존 방식(좌표 기반) 시도
+        bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
+        if bus_files:
+            # (기존 좌표 로직 생략 없이 유지 - 호환성 위해)
+            bus_path = os.path.join('./data', bus_files[0])
+            try:
+                if bus_path.lower().endswith('.csv'):
+                    try: df_bus = pd.read_csv(bus_path, encoding='cp949')
+                    except: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+                else:
+                    df_bus = pd.read_excel(bus_path, engine='openpyxl')
 
-    # 4. 지하철 (NEW: 지정된 파일만 사용)
+                x_c = next((c for c in ['X', 'x', '경도'] if c in df_bus.columns), None)
+                y_c = next((c for c in ['Y', 'y', '위도'] if c in df_bus.columns), None)
+
+                if x_c and y_c:
+                    df_bus = df_bus.dropna(subset=[x_c, y_c])
+                    if df_bus[x_c].iloc[0] <= 180:
+                        geom = [Point(xy) for xy in zip(df_bus[x_c], df_bus[y_c])]
+                        gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
+                        joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
+                        cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
+                        gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+                        gdf = gdf.merge(cnt, on='자치구명', how='left')
+                        gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+                        gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+                        data_info['버스'] = {'file': bus_files[0], 'status': '✅ (좌표)'}
+            except: pass
+        else:
+            data_info['버스'] = {'file': '없음', 'status': '❌'}
+
+    # 4. 지하철 (NEW: 지정된 파일 사용)
     target_subway_file = "서울교통공사_자치구별 지하철역 정보_20250804.CSV"
     sub_path = os.path.join('./data', target_subway_file)
     
     if os.path.exists(sub_path):
         try:
-            # CSV 읽기 (utf-8 시도 후 cp949)
             try: df_sub = pd.read_csv(sub_path, encoding='utf-8')
             except: df_sub = pd.read_csv(sub_path, encoding='cp949')
 
-            # 컬럼 확인 ('자치구', '역개수')
             if '자치구' in df_sub.columns and '역개수' in df_sub.columns:
-                # 이름 통일
                 df_sub = df_sub.rename(columns={'자치구': '자치구명', '역개수': '지하철역_수'})
-                
-                # 병합
                 gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                 gdf = gdf.merge(df_sub[['자치구명', '지하철역_수']], on='자치구명', how='left')
-                
-                # 결측치 0 처리 및 밀도 계산
-                gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
-                gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
-                
                 data_info['지하철'] = {'file': target_subway_file, 'status': '✅'}
             else:
-                data_info['지하철'] = {'file': target_subway_file, 'status': '⚠️'}
-        except Exception as e:
+                data_info['지하철'] = {'file': target_subway_file, 'status': '⚠️ 컬럼 오류'}
+        except:
             data_info['지하철'] = {'file': target_subway_file, 'status': '❌'}
+    
+    # 공통: 결측치 및 밀도 재계산
+    gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
+    if '지하철역 밀도' not in gdf.columns:
+        gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
     else:
-        # 파일이 없을 경우 다른 파일이라도 찾아보기
-        sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
-        if sub_files:
-             data_info['지하철'] = {'file': sub_files[0], 'status': '⚠️ (대체 파일)'}
-        else:
-             data_info['지하철'] = {'file': '없음', 'status': '❌'}
+        gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
 
     # 5. 통계
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
@@ -173,7 +185,7 @@ st.sidebar.markdown("---")
 # PAGE 1: 서울시 전체 분석
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 대중교통 개선 대시보드")
+    st.title("🏙️ 서울시 도시계획 종합 분석")
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
@@ -255,7 +267,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 대중교통 현황판")
+    st.markdown(f"### **{selected_district}** 도시계획 현황판")
     st.markdown("---")
 
     try:
