@@ -9,7 +9,7 @@ from shapely.geometry import Point
 # --------------------------------------------------------------------------
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="서울시 대중교통 개선 대시보드")
+st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수
@@ -17,7 +17,7 @@ st.set_page_config(layout="wide", page_title="서울시 대중교통 개선 대�
 @st.cache_data
 def load_and_merge_data():
     logs = []
-    data_info = {} # 데이터 정보 저장
+    data_info = {} 
 
     # [A] 지도 데이터
     map_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
@@ -184,7 +184,7 @@ st.sidebar.markdown("---")
 # PAGE 1: 서울시 전체 분석
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 대중교통 종합 분석")
+    st.title("🏙️ 서울시 도시계획 종합 분석")
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
@@ -237,7 +237,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         )
         
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="green")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
@@ -245,7 +245,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         st.plotly_chart(fig_bar, use_container_width=True)
 
 # --------------------------------------------------------------------------
-# PAGE 2: 자치구별 상세 리포트
+# PAGE 2: 자치구별 상세 리포트 (수정됨: 상세 요소 테이블 추가)
 # --------------------------------------------------------------------------
 else:
     st.title("📍 자치구별 상세 리포트")
@@ -253,12 +253,13 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 대중교통 현황판")
+    st.markdown(f"### **{selected_district}** 도시계획 현황판")
     st.markdown("---")
 
     try:
         target_row = gdf[gdf['자치구명'] == selected_district].iloc[0]
         
+        # [1] 핵심 지표 카드
         c1, c2, c3, c4 = st.columns(4)
         pop_val = target_row.get('총 상주인구 수 (명)', 0)
         area_val = target_row.get('면적 (km²)', 0)
@@ -273,11 +274,9 @@ else:
         with c3: st.metric("🚌 교통 비율", f"{ratio_val:.4f}", delta=f"{diff:.4f} (평균 대비)")
         with c4: st.metric("🚨 부족 순위", f"{rank_val:.0f}위", help="1위에 가까울수록 개선이 시급함")
         
-        total_trans = target_row.get('총_교통수단_수', 0)
-        st.info(f"ℹ️ **{selected_district}**에는 총 **{int(total_trans)}개**의 대중교통 시설(버스+지하철)이 있습니다.")
-        
         st.markdown("---")
 
+        # [2] 화면 분할 (지도 | 비교 그래프)
         col_d1, col_d2 = st.columns([1, 1])
         
         with col_d1:
@@ -303,7 +302,6 @@ else:
 
         with col_d2:
             st.subheader("📊 교통 부족 순위 비교 (낮을수록 시급)")
-            
             my_val = rank_val
             avg_rank = gdf['교통 부족 순위 (위)'].mean()
             
@@ -319,8 +317,43 @@ else:
                 text='순위'
             )
             fig_comp.update_traces(texttemplate='%{text:.0f}위', textposition='outside')
-            fig_comp.update_layout(showlegend=False, margin={"r":0,"t":40,"l":0,"b":0}, height=400, yaxis_title="순위 (숫자가 작을수록 부족함)")
+            fig_comp.update_layout(showlegend=False, margin={"r":0,"t":40,"l":0,"b":0}, height=400, yaxis_title="순위")
             st.plotly_chart(fig_comp, use_container_width=True)
+
+        # ------------------------------------------------------------------
+        # [3] 상세 데이터 리스트 (인덱스 없이 표 형태) - 추가된 부분
+        # ------------------------------------------------------------------
+        st.markdown(f"#### 📋 {selected_district} 상세 지표 목록")
+        
+        # 보여줄 컬럼 정의
+        cols_to_show = {
+            '총 상주인구 수 (명)': '총 상주인구',
+            '면적 (km²)': '면적',
+            '인구 밀도 (명/km²)': '인구 밀도',
+            '집객시설 수 (개)': '집객시설 수',
+            '버스정류장 수 (개)': '버스정류장 수',
+            '버스정류장 밀도 (개/km²)': '버스정류장 밀도',
+            '지하철역 수 (개)': '지하철역 수',
+            '지하철역 밀도 (개/km²)': '지하철역 밀도',
+            '대중교통 밀도 (개/km²)': '통합 대중교통 밀도',
+            '인구 대비 교통수단 비율 (개/명)': '1인당 교통비율',
+            '교통 부족 순위 (위)': '교통 부족 순위'
+        }
+        
+        detail_list = []
+        for col, name in cols_to_show.items():
+            if col in target_row:
+                val = target_row[col]
+                # 소수점 포맷팅
+                if '밀도' in name or '비율' in name:
+                    formatted_val = f"{val:,.4f}"
+                else:
+                    formatted_val = f"{val:,.0f}"
+                detail_list.append({"항목": name, "값": formatted_val})
+        
+        df_detail = pd.DataFrame(detail_list)
+        # 인덱스 숨기고, 전체 너비 사용
+        st.dataframe(df_detail, use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"상세 정보를 표시하는 중 오류가 발생했습니다: {e}")
