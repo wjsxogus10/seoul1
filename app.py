@@ -9,7 +9,7 @@ from shapely.geometry import Point
 # --------------------------------------------------------------------------
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
+st.set_page_config(layout="wide", page_title="서울시 대중교통 개선선 대시보드")
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수
@@ -253,7 +253,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 도시계획 현황판")
+    st.markdown(f"### **{selected_district}** 대중교통통 현황판")
     st.markdown("---")
 
     try:
