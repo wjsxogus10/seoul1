@@ -97,61 +97,41 @@ def load_and_merge_data():
     else:
         data_info['버스'] = {'file': '없음', 'status': '❌'}
 
-    # 4. 지하철 (업데이트됨: 새 파일 구조 반영)
-    sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
-    if sub_files:
-        sub_path = sub_files[0]
+    # 4. 지하철 (NEW: 지정된 파일만 사용)
+    target_subway_file = "서울교통공사_자치구별 지하철역 정보_20250804.CSV"
+    sub_path = os.path.join('./data', target_subway_file)
+    
+    if os.path.exists(sub_path):
         try:
-            full_path = os.path.join('./data', sub_path)
-            if sub_path.lower().endswith('.csv'):
-                try: df_sub = pd.read_csv(full_path, encoding='utf-8')
-                except: df_sub = pd.read_csv(full_path, encoding='cp949')
-            else:
-                df_sub = pd.read_excel(full_path, engine='openpyxl')
+            # CSV 읽기 (utf-8 시도 후 cp949)
+            try: df_sub = pd.read_csv(sub_path, encoding='utf-8')
+            except: df_sub = pd.read_csv(sub_path, encoding='cp949')
 
-            # [CASE 1] 새로운 데이터 형식 (자치구, 역개수)
+            # 컬럼 확인 ('자치구', '역개수')
             if '자치구' in df_sub.columns and '역개수' in df_sub.columns:
+                # 이름 통일
                 df_sub = df_sub.rename(columns={'자치구': '자치구명', '역개수': '지하철역_수'})
+                
+                # 병합
                 gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                 gdf = gdf.merge(df_sub[['자치구명', '지하철역_수']], on='자치구명', how='left')
-                data_info['지하철'] = {'file': sub_path, 'status': '✅'}
                 
-            # [CASE 2] 기존 데이터 형식 (자치구_코드_명, 지하철역_수)
-            elif '자치구_코드_명' in df_sub.columns and '지하철역_수' in df_sub.columns:
-                df_sub = df_sub.rename(columns={'자치구_코드_명': '자치구명'})
-                gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
-                cols = ['자치구명', '지하철역_수']
-                if '지하철역 밀도' in df_sub.columns: cols.append('지하철역 밀도')
-                gdf = gdf.merge(df_sub[cols], on='자치구명', how='left')
-                data_info['지하철'] = {'file': sub_path, 'status': '✅'}
-            
-            # [CASE 3] 좌표 데이터
-            else:
-                x_c = next((c for c in ['경도', 'X', 'x'] if c in df_sub.columns), None)
-                y_c = next((c for c in ['위도', 'Y', 'y'] if c in df_sub.columns), None)
-                if x_c and y_c:
-                    df_sub = df_sub.dropna(subset=[x_c, y_c])
-                    geom = [Point(xy) for xy in zip(df_sub[x_c], df_sub[y_c])]
-                    gdf_sub = geopandas.GeoDataFrame(df_sub, geometry=geom, crs="EPSG:4326")
-                    joined = geopandas.sjoin(gdf_sub, gdf, how="inner", predicate="within")
-                    cnt = joined.groupby('자치구명').size().reset_index(name='지하철역_수')
-                    gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
-                    gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    data_info['지하철'] = {'file': sub_path, 'status': '✅'}
-                else:
-                    data_info['지하철'] = {'file': sub_path, 'status': '⚠️'}
-            
-            # 공통: 결측치 및 밀도 재계산
-            gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
-            if '지하철역 밀도' not in gdf.columns:
+                # 결측치 0 처리 및 밀도 계산
+                gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
                 gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
+                
+                data_info['지하철'] = {'file': target_subway_file, 'status': '✅'}
             else:
-                gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
-
-        except:
-            data_info['지하철'] = {'file': sub_path, 'status': '❌'}
+                data_info['지하철'] = {'file': target_subway_file, 'status': '⚠️'}
+        except Exception as e:
+            data_info['지하철'] = {'file': target_subway_file, 'status': '❌'}
     else:
-        data_info['지하철'] = {'file': '없음', 'status': '❌'}
+        # 파일이 없을 경우 다른 파일이라도 찾아보기
+        sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
+        if sub_files:
+             data_info['지하철'] = {'file': sub_files[0], 'status': '⚠️ (대체 파일)'}
+        else:
+             data_info['지하철'] = {'file': '없음', 'status': '❌'}
 
     # 5. 통계
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
