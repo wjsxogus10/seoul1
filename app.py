@@ -255,7 +255,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 도시계획 현황판")
+    st.markdown(f"### **{selected_district}** 대중교통 현황판")
     st.markdown("---")
 
     try:
