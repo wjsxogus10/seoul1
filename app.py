@@ -9,7 +9,7 @@ from shapely.geometry import Point
 # --------------------------------------------------------------------------
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="서울시 대중교통 개선선 대시보드")
+st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수
@@ -17,7 +17,7 @@ st.set_page_config(layout="wide", page_title="서울시 대중교통 개선선 �
 @st.cache_data
 def load_and_merge_data():
     logs = []
-    data_info = {}
+    data_info = {} # 데이터 정보 저장
 
     # [A] 지도 데이터
     map_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
@@ -97,27 +97,35 @@ def load_and_merge_data():
     else:
         data_info['버스'] = {'file': '없음', 'status': '❌'}
 
-    # 4. 지하철
+    # 4. 지하철 (업데이트됨: 새 파일 구조 반영)
     sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
     if sub_files:
         sub_path = sub_files[0]
         try:
             full_path = os.path.join('./data', sub_path)
             if sub_path.lower().endswith('.csv'):
-                try: df_sub = pd.read_csv(full_path, encoding='cp949')
-                except: df_sub = pd.read_csv(full_path, encoding='utf-8')
+                try: df_sub = pd.read_csv(full_path, encoding='utf-8')
+                except: df_sub = pd.read_csv(full_path, encoding='cp949')
             else:
                 df_sub = pd.read_excel(full_path, engine='openpyxl')
 
-            if '자치구_코드_명' in df_sub.columns and '지하철역_수' in df_sub.columns:
+            # [CASE 1] 새로운 데이터 형식 (자치구, 역개수)
+            if '자치구' in df_sub.columns and '역개수' in df_sub.columns:
+                df_sub = df_sub.rename(columns={'자치구': '자치구명', '역개수': '지하철역_수'})
+                gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
+                gdf = gdf.merge(df_sub[['자치구명', '지하철역_수']], on='자치구명', how='left')
+                data_info['지하철'] = {'file': sub_path, 'status': '✅'}
+                
+            # [CASE 2] 기존 데이터 형식 (자치구_코드_명, 지하철역_수)
+            elif '자치구_코드_명' in df_sub.columns and '지하철역_수' in df_sub.columns:
                 df_sub = df_sub.rename(columns={'자치구_코드_명': '자치구명'})
-                d_col = next((c for c in df_sub.columns if '밀도' in c), None)
-                if d_col: df_sub = df_sub.rename(columns={d_col: '지하철역 밀도'})
                 gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                 cols = ['자치구명', '지하철역_수']
                 if '지하철역 밀도' in df_sub.columns: cols.append('지하철역 밀도')
                 gdf = gdf.merge(df_sub[cols], on='자치구명', how='left')
                 data_info['지하철'] = {'file': sub_path, 'status': '✅'}
+            
+            # [CASE 3] 좌표 데이터
             else:
                 x_c = next((c for c in ['경도', 'X', 'x'] if c in df_sub.columns), None)
                 y_c = next((c for c in ['위도', 'Y', 'y'] if c in df_sub.columns), None)
@@ -133,6 +141,7 @@ def load_and_merge_data():
                 else:
                     data_info['지하철'] = {'file': sub_path, 'status': '⚠️'}
             
+            # 공통: 결측치 및 밀도 재계산
             gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
             if '지하철역 밀도' not in gdf.columns:
                 gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
@@ -184,7 +193,7 @@ st.sidebar.markdown("---")
 # PAGE 1: 서울시 전체 분석
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 대중교통 개선 대시보드")
+    st.title("🏙️ 서울시 도시계획 종합 분석")
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
@@ -206,12 +215,10 @@ if page_mode == "🏙️ 서울시 전체 분석":
 
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
         
-        # [툴팁 설정] 전체 지도 - 컬럼 목록 명시
         hover_data_cols = [
             '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
             '버스정류장 수 (개)', '지하철역 수 (개)', '인구 대비 교통수단 비율 (개/명)'
         ]
-        # 실제 존재하는 컬럼만 필터링
         final_hover_cols = [c for c in hover_data_cols if c in gdf.columns]
 
         fig = px.choropleth_mapbox(
@@ -219,12 +226,10 @@ if page_mode == "🏙️ 서울시 전체 분석":
             color=selected_col, mapbox_style="carto-positron", zoom=9.5,
             center={"lat": 37.5665, "lon": 126.9780}, opacity=0.6,
             hover_name='자치구명', 
-            hover_data=final_hover_cols, # 데이터를 명시적으로 전달
+            hover_data=final_hover_cols,
             color_continuous_scale=colorscale
         )
         
-        # [핵심 수정] 툴팁 문법 간소화 (문자열 충돌 방지)
-        # %{customdata[0]} 은 hover_data의 첫번째 컬럼(자치구명)을 의미
         fig.update_traces(
             hovertemplate="<b>%{customdata[0]}</b><br>" + 
                           f"{selected_col}: %{{z}}<br>" + 
@@ -270,7 +275,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 대중교통통 현황판")
+    st.markdown(f"### **{selected_district}** 도시계획 현황판")
     st.markdown("---")
 
     try:
@@ -305,7 +310,6 @@ else:
             center_lat = district_geo.geometry.centroid.y.values[0]
             center_lon = district_geo.geometry.centroid.x.values[0]
             
-            # [상세 지도 툴팁] 모든 정보 포함
             hover_cols = [
                 '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
                 '버스정류장 수 (개)', '지하철역 수 (개)', 
@@ -318,12 +322,10 @@ else:
                 color='교통 부족 순위 (위)', mapbox_style="carto-positron", zoom=11,
                 center={"lat": center_lat, "lon": center_lon}, opacity=0.1,
                 hover_name='자치구명', 
-                hover_data=valid_hover, # 툴팁 데이터 전달
+                hover_data=valid_hover,
                 color_continuous_scale='Reds_r'
             )
             
-            # [핵심] 상세 지도 툴팁 디자인
-            # customdata[0] = 자치구명, [1] = 인구, [2] = 면적 ... (hover_data 순서대로)
             fig_d.update_traces(
                 hovertemplate="<b>%{customdata[0]}</b><br><br>" +
                 "👥 인구: %{customdata[1]:,.0f}명<br>" +
@@ -334,14 +336,12 @@ else:
                 "🚨 순위: %{customdata[6]:.0f}위<extra></extra>"
             )
 
-            # 선택된 구 하이라이트 (툴팁 동일 적용)
             highlight_trace = px.choropleth_mapbox(
                 district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
                 color_discrete_sequence=['#FF4B4B'], opacity=0.9,
                 hover_name='자치구명', hover_data=valid_hover
             ).data[0]
             
-            # 하이라이트 트레이스에 툴팁 서식 복사
             highlight_trace.hovertemplate = fig_d.data[0].hovertemplate
             fig_d.add_trace(highlight_trace)
 
