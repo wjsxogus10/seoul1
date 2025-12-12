@@ -205,15 +205,27 @@ if page_mode == "🏙️ 서울시 전체 분석":
         else: colorscale = 'Viridis'
 
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
+        
+        # [툴팁 설정] 전체 지도에서도 상세 정보를 다 보여줌
+        hover_data_cols = {
+            '총 상주인구 수 (명)': ':.0f',
+            '면적 (km²)': ':.2f',
+            '버스정류장 수 (개)': ':.0f',
+            '지하철역 수 (개)': ':.0f',
+            '인구 대비 교통수단 비율 (개/명)': ':.4f',
+            '교통 부족 순위 (위)': ':.0f'
+        }
+        # 실제로 존재하는 컬럼만 필터링
+        hover_data_clean = {k:v for k,v in hover_data_cols.items() if k in gdf.columns}
+
         fig = px.choropleth_mapbox(
             gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
             color=selected_col, mapbox_style="carto-positron", zoom=9.5,
             center={"lat": 37.5665, "lon": 126.9780}, opacity=0.6,
-            hover_name='자치구명', color_continuous_scale=colorscale
+            hover_name='자치구명', 
+            hover_data=hover_data_clean, # 툴팁 데이터 추가
+            color_continuous_scale=colorscale
         )
-        is_float = '밀도' in selected_col or '비율' in selected_col
-        num_format = ",.4f" if is_float else ",.0f"
-        fig.update_traces(hovertemplate=f"<b>%{{hovertext}}</b><br><br>{selected_col}: %{{z:{num_format}}}<extra></extra>")
         fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -245,7 +257,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         st.plotly_chart(fig_bar, use_container_width=True)
 
 # --------------------------------------------------------------------------
-# PAGE 2: 자치구별 상세 리포트 (수정됨: 상세 요소 테이블 추가)
+# PAGE 2: 자치구별 상세 리포트
 # --------------------------------------------------------------------------
 else:
     st.title("📍 자치구별 상세 리포트")
@@ -259,7 +271,6 @@ else:
     try:
         target_row = gdf[gdf['자치구명'] == selected_district].iloc[0]
         
-        # [1] 핵심 지표 카드
         c1, c2, c3, c4 = st.columns(4)
         pop_val = target_row.get('총 상주인구 수 (명)', 0)
         area_val = target_row.get('면적 (km²)', 0)
@@ -276,27 +287,55 @@ else:
         
         st.markdown("---")
 
-        # [2] 화면 분할 (지도 | 비교 그래프)
         col_d1, col_d2 = st.columns([1, 1])
         
         with col_d1:
-            st.subheader(f"🗺️ {selected_district} 위치")
+            st.subheader(f"🗺️ {selected_district} 상세 지도")
+            st.caption("💡 지도에 마우스를 올리면 상세 정보를 볼 수 있습니다.")
+            
             district_geo = gdf[gdf['자치구명'] == selected_district]
             center_lat = district_geo.geometry.centroid.y.values[0]
             center_lon = district_geo.geometry.centroid.x.values[0]
             
+            # [핵심 수정] 툴팁에 보여줄 데이터 정의
+            hover_cols = [
+                '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
+                '버스정류장 수 (개)', '지하철역 수 (개)', 
+                '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
+            ]
+            # 실제 존재하는 컬럼만 선택
+            valid_hover = [c for c in hover_cols if c in gdf.columns]
+
             fig_d = px.choropleth_mapbox(
                 gdf, geojson=gdf.geometry.__geo_interface__, locations=gdf.index,
                 color='교통 부족 순위 (위)', mapbox_style="carto-positron", zoom=11,
                 center={"lat": center_lat, "lon": center_lon}, opacity=0.1,
-                hover_name='자치구명', color_continuous_scale='Reds_r'
+                hover_name='자치구명', 
+                hover_data=valid_hover, # 모든 상세 데이터 삽입
+                color_continuous_scale='Reds_r'
             )
+            
+            # 툴팁 디자인 커스터마이징 (깔끔하게 줄바꿈)
+            fig_d.update_traces(
+                hovertemplate="<b>%{hovertext}</b><br><br>" +
+                "👥 인구: %{customdata[1]:,.0f}명<br>" +
+                "🗺️ 면적: %{customdata[2]:.2f}km²<br>" +
+                "🚌 버스: %{customdata[3]:,.0f}개<br>" +
+                "🚇 지하철: %{customdata[4]:,.0f}개<br>" +
+                "📊 비율: %{customdata[5]:.4f}<br>" +
+                "🚨 순위: %{customdata[6]:.0f}위<extra></extra>"
+            )
+
             fig_d.add_trace(
                 px.choropleth_mapbox(
                     district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
                     color_discrete_sequence=['#FF4B4B'], opacity=0.9
                 ).data[0]
             )
+            # 하이라이트 된 부분의 툴팁도 동일하게 적용 (복사)
+            fig_d.data[1].customdata = fig_d.data[0].customdata[district_geo.index]
+            fig_d.data[1].hovertemplate = fig_d.data[0].hovertemplate
+
             fig_d.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=400, showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig_d, use_container_width=True)
 
@@ -319,41 +358,6 @@ else:
             fig_comp.update_traces(texttemplate='%{text:.0f}위', textposition='outside')
             fig_comp.update_layout(showlegend=False, margin={"r":0,"t":40,"l":0,"b":0}, height=400, yaxis_title="순위")
             st.plotly_chart(fig_comp, use_container_width=True)
-
-        # ------------------------------------------------------------------
-        # [3] 상세 데이터 리스트 (인덱스 없이 표 형태) - 추가된 부분
-        # ------------------------------------------------------------------
-        st.markdown(f"#### 📋 {selected_district} 상세 지표 목록")
-        
-        # 보여줄 컬럼 정의
-        cols_to_show = {
-            '총 상주인구 수 (명)': '총 상주인구',
-            '면적 (km²)': '면적',
-            '인구 밀도 (명/km²)': '인구 밀도',
-            '집객시설 수 (개)': '집객시설 수',
-            '버스정류장 수 (개)': '버스정류장 수',
-            '버스정류장 밀도 (개/km²)': '버스정류장 밀도',
-            '지하철역 수 (개)': '지하철역 수',
-            '지하철역 밀도 (개/km²)': '지하철역 밀도',
-            '대중교통 밀도 (개/km²)': '통합 대중교통 밀도',
-            '인구 대비 교통수단 비율 (개/명)': '1인당 교통비율',
-            '교통 부족 순위 (위)': '교통 부족 순위'
-        }
-        
-        detail_list = []
-        for col, name in cols_to_show.items():
-            if col in target_row:
-                val = target_row[col]
-                # 소수점 포맷팅
-                if '밀도' in name or '비율' in name:
-                    formatted_val = f"{val:,.4f}"
-                else:
-                    formatted_val = f"{val:,.0f}"
-                detail_list.append({"항목": name, "값": formatted_val})
-        
-        df_detail = pd.DataFrame(detail_list)
-        # 인덱스 숨기고, 전체 너비 사용
-        st.dataframe(df_detail, use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"상세 정보를 표시하는 중 오류가 발생했습니다: {e}")
