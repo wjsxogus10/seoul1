@@ -12,10 +12,9 @@ from shapely.geometry import Point
 st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
 
 # --------------------------------------------------------------------------
-# 2. 데이터 로드 및 병합 함수 (캐시 삭제 권장)
+# 2. 데이터 로드 및 병합 함수
 # --------------------------------------------------------------------------
-# 캐시를 쓰되, 파일이 바뀌면 갱신하도록 ttl 설정 (선택 사항)
-@st.cache_data(ttl=600) 
+@st.cache_data
 def load_and_merge_data():
     logs = []
     data_info = {} 
@@ -40,11 +39,7 @@ def load_and_merge_data():
     # 1. 인구
     pop_file = '서울시 상권분석서비스(상주인구-자치구).csv'
     try:
-        # 경로 2중 체크
-        if os.path.exists(f'./data/{pop_file}'): path = f'./data/{pop_file}'
-        else: path = pop_file
-        
-        df_pop = pd.read_csv(path, encoding='cp949')
+        df_pop = pd.read_csv(f'./data/{pop_file}', encoding='cp949')
         grp = df_pop.groupby('자치구_코드_명')['총_상주인구_수'].mean().reset_index().rename(columns={'자치구_코드_명':'자치구명'})
         gdf = gdf.drop(columns=['총_상주인구_수', '인구 밀도'], errors='ignore')
         gdf = gdf.merge(grp, on='자치구명', how='left')
@@ -57,10 +52,7 @@ def load_and_merge_data():
     # 2. 상권
     biz_file = '서울시 상권분석서비스(집객시설-자치구).csv'
     try:
-        if os.path.exists(f'./data/{biz_file}'): path = f'./data/{biz_file}'
-        else: path = biz_file
-        
-        df_biz = pd.read_csv(path, encoding='cp949')
+        df_biz = pd.read_csv(f'./data/{biz_file}', encoding='cp949')
         grp = df_biz.groupby('자치구_코드_명')['집객시설_수'].mean().reset_index().rename(columns={'자치구_코드_명':'자치구명'})
         gdf = gdf.drop(columns=['집객시설 수'], errors='ignore')
         gdf = gdf.merge(grp, on='자치구명', how='left')
@@ -69,29 +61,17 @@ def load_and_merge_data():
     except:
         data_info['상권'] = {'file': biz_file, 'status': '❌'}
 
-    # ----------------------------------------------------------------------
-    # 3. 버스 (파일 찾기 로직 강화)
-    # ----------------------------------------------------------------------
+    # 3. 버스 (요청하신 파일 적용)
     target_bus_file = "20250930기준_서울시정류소(정류소별).xlsx - 시내버스 정류장.csv"
+    bus_path = os.path.join('./data', target_bus_file)
     
-    # 1) data 폴더 안에 있는지 확인
-    if os.path.exists(f'./data/{target_bus_file}'):
-        bus_final_path = f'./data/{target_bus_file}'
-    # 2) 아니면 그냥 루트 폴더에 있는지 확인
-    elif os.path.exists(target_bus_file):
-        bus_final_path = target_bus_file
-    else:
-        bus_final_path = None
-
-    if bus_final_path:
+    if os.path.exists(bus_path):
         try:
-            # CSV 읽기 (인코딩 자동 시도)
-            try: df_bus = pd.read_csv(bus_final_path, encoding='utf-8')
-            except: df_bus = pd.read_csv(bus_final_path, encoding='cp949')
+            try: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+            except: df_bus = pd.read_csv(bus_path, encoding='cp949')
 
-            # '자치구' 컬럼이 있으면 바로 집계 (좌표 필요 없음)
             if '자치구' in df_bus.columns:
-                # 자치구별 개수 세기 (value_counts)
+                # 자치구별 개수 세기
                 bus_cnt = df_bus['자치구'].value_counts().reset_index()
                 bus_cnt.columns = ['자치구명', '버스정류장_수']
                 
@@ -102,25 +82,26 @@ def load_and_merge_data():
                 gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
                 gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
                 
-                data_info['버스'] = {'file': target_bus_file, 'status': '✅ (새 파일 적용됨)'}
+                data_info['버스'] = {'file': target_bus_file, 'status': '✅'}
             else:
-                data_info['버스'] = {'file': target_bus_file, 'status': '⚠️ 컬럼 오류 (자치구 없음)'}
+                data_info['버스'] = {'file': target_bus_file, 'status': '⚠️ 컬럼 오류'}
         except Exception as e:
-            data_info['버스'] = {'file': target_bus_file, 'status': '❌ 읽기 실패', 'desc': str(e)}
+            data_info['버스'] = {'file': target_bus_file, 'status': '❌', 'desc': str(e)}
     else:
-        # 새 파일이 없으면 기존 로직(StationInfo) 시도
+        # 파일 없을 때 기존 로직
         bus_files = [f for f in os.listdir('./data') if 'Station' in f]
         if bus_files:
-            # (기존 좌표 로직 유지)
+            bus_path = os.path.join('./data', bus_files[0])
             try:
-                path = f'./data/{bus_files[0]}'
-                if path.lower().endswith('.csv'):
-                    try: df_bus = pd.read_csv(path, encoding='cp949')
-                    except: df_bus = pd.read_csv(path, encoding='utf-8')
-                else: df_bus = pd.read_excel(path, engine='openpyxl')
-                
+                if bus_path.lower().endswith('.csv'):
+                    try: df_bus = pd.read_csv(bus_path, encoding='cp949')
+                    except: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+                else:
+                    df_bus = pd.read_excel(bus_path, engine='openpyxl')
+
                 x_c = next((c for c in ['X', 'x', '경도'] if c in df_bus.columns), None)
                 y_c = next((c for c in ['Y', 'y', '위도'] if c in df_bus.columns), None)
+
                 if x_c and y_c:
                     df_bus = df_bus.dropna(subset=[x_c, y_c])
                     if df_bus[x_c].iloc[0] <= 180:
@@ -132,22 +113,19 @@ def load_and_merge_data():
                         gdf = gdf.merge(cnt, on='자치구명', how='left')
                         gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
                         gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-                        data_info['버스'] = {'file': bus_files[0], 'status': '✅ (기존 좌표파일)'}
+                        data_info['버스'] = {'file': bus_files[0], 'status': '✅ (좌표)'}
             except: pass
         else:
-            data_info['버스'] = {'file': '파일 없음', 'status': '❌'}
+            data_info['버스'] = {'file': '없음', 'status': '❌'}
 
-    # 4. 지하철 (지정 파일 최우선)
+    # 4. 지하철
     target_subway_file = "서울교통공사_자치구별 지하철역 정보_20250804.CSV"
+    sub_path = os.path.join('./data', target_subway_file)
     
-    if os.path.exists(f'./data/{target_subway_file}'): sub_final_path = f'./data/{target_subway_file}'
-    elif os.path.exists(target_subway_file): sub_final_path = target_subway_file
-    else: sub_final_path = None
-
-    if sub_final_path:
+    if os.path.exists(sub_path):
         try:
-            try: df_sub = pd.read_csv(sub_final_path, encoding='utf-8')
-            except: df_sub = pd.read_csv(sub_final_path, encoding='cp949')
+            try: df_sub = pd.read_csv(sub_path, encoding='utf-8')
+            except: df_sub = pd.read_csv(sub_path, encoding='cp949')
 
             if '자치구' in df_sub.columns and '역개수' in df_sub.columns:
                 df_sub = df_sub.rename(columns={'자치구': '자치구명', '역개수': '지하철역_수'})
@@ -159,7 +137,6 @@ def load_and_merge_data():
         except:
             data_info['지하철'] = {'file': target_subway_file, 'status': '❌'}
     else:
-        # 없으면 기존 파일 검색
         sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
         if sub_files:
              data_info['지하철'] = {'file': sub_files[0], 'status': '⚠️ (기존 파일)'}
@@ -220,6 +197,10 @@ if page_mode == "🏙️ 서울시 전체 분석":
         '버스정류장 밀도 (개/km²)', '지하철역 밀도 (개/km²)', '대중교통 밀도 (개/km²)',
         '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
     ]
+    # [수정] 버스정류장 개수를 우선적으로 보여주도록 정렬
+    if '버스정류장 수 (개)' in metrics_order:
+        metrics_order.insert(0, metrics_order.pop(metrics_order.index('버스정류장 수 (개)')))
+
     valid_metrics = [m for m in metrics_order if m in gdf.columns]
     
     if valid_metrics:
@@ -257,6 +238,17 @@ if page_mode == "🏙️ 서울시 전체 분석":
         
         fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
         st.plotly_chart(fig, use_container_width=True)
+
+        # -----------------------------------------------------------
+        # [NEW] 버스정류장 개수 테이블 (요청사항)
+        # -----------------------------------------------------------
+        if '버스' in selected_col and '개)' in selected_col:
+            st.markdown("### 🚏 자치구별 버스 정류장 개수 (상위 순)")
+            # 보기 좋게 데이터프레임 정리
+            df_bus_view = gdf[['자치구명', '버스정류장 수 (개)']].sort_values(by='버스정류장 수 (개)', ascending=False)
+            df_bus_view = df_bus_view.reset_index(drop=True)
+            df_bus_view.index += 1 # 1위부터 시작
+            st.dataframe(df_bus_view, use_container_width=True)
 
         st.markdown("---")
 
