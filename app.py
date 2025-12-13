@@ -173,7 +173,7 @@ st.sidebar.markdown("---")
 # PAGE 1: 서울시 전체 분석
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 도시계획 종합 분석")
+    st.title("🏙️ 서울시 대중교통 개선 대시보드")
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
@@ -255,7 +255,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 도시계획 현황판")
+    st.markdown(f"### **{selected_district}** 대중교통 현황")
     st.markdown("---")
 
     try:
