@@ -61,84 +61,106 @@ def load_and_merge_data():
     except:
         data_info['상권'] = {'file': biz_file, 'status': '❌'}
 
-    # 3. 버스
-    bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
-    if bus_files:
-        bus_path = bus_files[0]
+    # 3. 버스 (NEW: 새로운 버스 데이터 적용)
+    target_bus_file = "20250930기준_서울시정류소(정류소별).xlsx - 시내버스 정류장.csv"
+    bus_path = os.path.join('./data', target_bus_file)
+    
+    if os.path.exists(bus_path):
         try:
-            full_path = os.path.join('./data', bus_path)
-            if bus_path.lower().endswith('.csv'):
-                try: df_bus = pd.read_csv(full_path, encoding='cp949')
-                except: df_bus = pd.read_csv(full_path, encoding='utf-8')
-            else:
-                df_bus = pd.read_excel(full_path, engine='openpyxl')
+            try: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+            except: df_bus = pd.read_csv(bus_path, encoding='cp949')
 
-            x_c = next((c for c in ['X', 'x', '경도', 'lon'] if c in df_bus.columns), None)
-            y_c = next((c for c in ['Y', 'y', '위도', 'lat'] if c in df_bus.columns), None)
-
-            if x_c and y_c:
-                df_bus = df_bus.dropna(subset=[x_c, y_c])
-                if df_bus[x_c].iloc[0] <= 180:
-                    geom = [Point(xy) for xy in zip(df_bus[x_c], df_bus[y_c])]
-                    gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
-                    joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
-                    cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
-                    gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
-                    gdf = gdf.merge(cnt, on='자치구명', how='left')
-                    gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
-                    gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
-                    data_info['버스'] = {'file': bus_path, 'status': '✅'}
-                else:
-                    data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
+            if '자치구' in df_bus.columns:
+                # 자치구별로 정류장 개수 세기
+                bus_cnt = df_bus['자치구'].value_counts().reset_index()
+                bus_cnt.columns = ['자치구명', '버스정류장_수']
+                
+                # 병합
+                gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+                gdf = gdf.merge(bus_cnt, on='자치구명', how='left')
+                
+                gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+                gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+                
+                data_info['버스'] = {'file': target_bus_file, 'status': '✅'}
             else:
-                data_info['버스'] = {'file': bus_path, 'status': '⚠️'}
-        except:
-            data_info['버스'] = {'file': bus_path, 'status': '❌'}
+                data_info['버스'] = {'file': target_bus_file, 'status': '⚠️ 컬럼 오류'}
+        except Exception as e:
+            data_info['버스'] = {'file': target_bus_file, 'status': '❌', 'desc': str(e)}
     else:
-        data_info['버스'] = {'file': '없음', 'status': '❌'}
+        # 파일이 없을 경우 기존 방식(좌표 기반) 시도
+        bus_files = [f for f in os.listdir('./data') if 'Station' in f or '버스' in f]
+        if bus_files:
+            # (기존 좌표 로직 생략 없이 유지 - 호환성 위해)
+            bus_path = os.path.join('./data', bus_files[0])
+            try:
+                if bus_path.lower().endswith('.csv'):
+                    try: df_bus = pd.read_csv(bus_path, encoding='cp949')
+                    except: df_bus = pd.read_csv(bus_path, encoding='utf-8')
+                else:
+                    df_bus = pd.read_excel(bus_path, engine='openpyxl')
 
-    # 4. 지하철 (NEW: 지정된 파일만 사용)
+                x_c = next((c for c in ['X', 'x', '경도'] if c in df_bus.columns), None)
+                y_c = next((c for c in ['Y', 'y', '위도'] if c in df_bus.columns), None)
+
+                if x_c and y_c:
+                    df_bus = df_bus.dropna(subset=[x_c, y_c])
+                    if df_bus[x_c].iloc[0] <= 180:
+                        geom = [Point(xy) for xy in zip(df_bus[x_c], df_bus[y_c])]
+                        gdf_bus = geopandas.GeoDataFrame(df_bus, geometry=geom, crs="EPSG:4326")
+                        joined = geopandas.sjoin(gdf_bus, gdf, how="inner", predicate="within")
+                        cnt = joined.groupby('자치구명').size().reset_index(name='버스정류장_수')
+                        gdf = gdf.drop(columns=['버스정류장_수', '버스정류장 밀도'], errors='ignore')
+                        gdf = gdf.merge(cnt, on='자치구명', how='left')
+                        gdf['버스정류장_수'] = gdf['버스정류장_수'].fillna(0)
+                        gdf['버스정류장 밀도'] = gdf['버스정류장_수'] / gdf['면적(km²)']
+                        data_info['버스'] = {'file': bus_files[0], 'status': '✅ (좌표)'}
+            except: pass
+        else:
+            data_info['버스'] = {'file': '없음', 'status': '❌'}
+
+    # 4. 지하철 (NEW: 지정된 파일 사용)
     target_subway_file = "서울교통공사_자치구별 지하철역 정보_20250804.CSV"
     sub_path = os.path.join('./data', target_subway_file)
     
     if os.path.exists(sub_path):
         try:
-            # CSV 읽기 (utf-8 시도 후 cp949)
             try: df_sub = pd.read_csv(sub_path, encoding='utf-8')
             except: df_sub = pd.read_csv(sub_path, encoding='cp949')
 
-            # 컬럼 확인 ('자치구', '역개수')
             if '자치구' in df_sub.columns and '역개수' in df_sub.columns:
-                # 이름 통일
                 df_sub = df_sub.rename(columns={'자치구': '자치구명', '역개수': '지하철역_수'})
-                
-                # 병합
                 gdf = gdf.drop(columns=['지하철역_수', '지하철역 밀도'], errors='ignore')
                 gdf = gdf.merge(df_sub[['자치구명', '지하철역_수']], on='자치구명', how='left')
-                
-                # 결측치 0 처리 및 밀도 계산
-                gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
-                gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
-                
                 data_info['지하철'] = {'file': target_subway_file, 'status': '✅'}
             else:
-                data_info['지하철'] = {'file': target_subway_file, 'status': '⚠️'}
-        except Exception as e:
+                data_info['지하철'] = {'file': target_subway_file, 'status': '⚠️ 컬럼 오류'}
+        except:
             data_info['지하철'] = {'file': target_subway_file, 'status': '❌'}
     else:
-        # 파일이 없을 경우 다른 파일이라도 찾아보기
         sub_files = [f for f in os.listdir('./data') if 'subway' in f.lower() or '지하철' in f]
         if sub_files:
-             data_info['지하철'] = {'file': sub_files[0], 'status': '⚠️ (대체 파일)'}
+             data_info['지하철'] = {'file': sub_files[0], 'status': '⚠️ (기존 파일)'}
         else:
              data_info['지하철'] = {'file': '없음', 'status': '❌'}
+    
+    # 공통: 결측치 및 밀도 재계산
+    gdf['지하철역_수'] = gdf['지하철역_수'].fillna(0)
+    if '지하철역 밀도' not in gdf.columns:
+        gdf['지하철역 밀도'] = gdf['지하철역_수'] / gdf['면적(km²)']
+    else:
+        gdf['지하철역 밀도'] = gdf['지하철역 밀도'].fillna(0)
 
-    # 5. 통계
+    # 5. 통계 (천 명당 지표 추가)
     gdf['총_교통수단_수'] = gdf.get('버스정류장_수', 0) + gdf.get('지하철역_수', 0)
     gdf['대중교통 밀도 (면적당)'] = gdf['총_교통수단_수'] / gdf['면적(km²)']
     pop_safe = gdf['총_상주인구_수'].replace(0, 1)
-    gdf['인구 대비 교통수단 비율'] = gdf['총_교통수단_수'] / pop_safe
-    gdf['교통 부족 순위 (인구 대비)'] = gdf['인구 대비 교통수단 비율'].rank(ascending=True, method='min')
+    
+    # [핵심 변경] 인구 천 명당 대중교통 수 계산
+    gdf['대중교통 수 (인구 천명당)'] = (gdf['총_교통수단_수'] / pop_safe) * 1000
+    
+    # 부족 순위는 천명당 개수가 '적을수록' 1위 (ascending=True)
+    gdf['교통 부족 순위'] = gdf['대중교통 수 (인구 천명당)'].rank(ascending=True, method='min')
 
     rename_map = {
         '총_상주인구_수': '총 상주인구 수 (명)',
@@ -150,8 +172,8 @@ def load_and_merge_data():
         '버스정류장 밀도': '버스정류장 밀도 (개/km²)',
         '지하철역 밀도': '지하철역 밀도 (개/km²)',
         '대중교통 밀도 (면적당)': '대중교통 밀도 (개/km²)',
-        '인구 대비 교통수단 비율': '인구 대비 교통수단 비율 (개/명)',
-        '교통 부족 순위 (인구 대비)': '교통 부족 순위 (위)'
+        '대중교통 수 (인구 천명당)': '대중교통 수 (인구 천명당)',
+        '교통 부족 순위': '교통 부족 순위 (위)'
     }
     gdf = gdf.rename(columns={k: v for k, v in rename_map.items() if k in gdf.columns})
     return gdf, logs, data_info
@@ -173,14 +195,18 @@ st.sidebar.markdown("---")
 # PAGE 1: 서울시 전체 분석
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 대중교통 개선 대시보드")
+    st.title("🏙️ 서울시 도시계획 종합 분석")
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
         '총 상주인구 수 (명)', '인구 밀도 (명/km²)', '집객시설 수 (개)',
         '버스정류장 밀도 (개/km²)', '지하철역 밀도 (개/km²)', '대중교통 밀도 (개/km²)',
-        '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
+        '대중교통 수 (인구 천명당)', '교통 부족 순위 (위)' # 변경된 지표
     ]
+    # 버스정류장 우선 표시
+    if '버스정류장 수 (개)' in metrics_order:
+        metrics_order.insert(0, metrics_order.pop(metrics_order.index('버스정류장 수 (개)')))
+
     valid_metrics = [m for m in metrics_order if m in gdf.columns]
     
     if valid_metrics:
@@ -195,9 +221,10 @@ if page_mode == "🏙️ 서울시 전체 분석":
 
         st.subheader(f"🗺️ 서울시 {selected_col} 지도")
         
+        # 툴팁에 보여줄 컬럼 업데이트
         hover_data_cols = [
             '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
-            '버스정류장 수 (개)', '지하철역 수 (개)', '인구 대비 교통수단 비율 (개/명)'
+            '버스정류장 수 (개)', '지하철역 수 (개)', '대중교통 수 (인구 천명당)'
         ]
         final_hover_cols = [c for c in hover_data_cols if c in gdf.columns]
 
@@ -210,9 +237,12 @@ if page_mode == "🏙️ 서울시 전체 분석":
             color_continuous_scale=colorscale
         )
         
+        # 툴팁 포맷 (소수점 2자리)
+        num_fmt = ":.2f" if '천명당' in selected_col or '밀도' in selected_col else ":.0f"
+        
         fig.update_traces(
             hovertemplate="<b>%{customdata[0]}</b><br>" + 
-                          f"{selected_col}: %{{z}}<br>" + 
+                          f"{selected_col}: %{{z{num_fmt}}}<br>" + 
                           "<extra></extra>"
         )
         
@@ -238,10 +268,12 @@ if page_mode == "🏙️ 서울시 전체 분석":
             color=selected_col, color_continuous_scale=colorscale
         )
         
-        avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.4f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="green")
+        # 평균선 포맷
+        avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.2f"
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
         
-        fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.4f}'
+        # 바 차트 텍스트 포맷
+        fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.2f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
         fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0}, coloraxis_showscale=False)
         st.plotly_chart(fig_bar, use_container_width=True)
@@ -255,7 +287,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 대중교통 현황")
+    st.markdown(f"### **{selected_district}** 도시계획 현황판")
     st.markdown("---")
 
     try:
@@ -264,15 +296,16 @@ else:
         c1, c2, c3, c4 = st.columns(4)
         pop_val = target_row.get('총 상주인구 수 (명)', 0)
         area_val = target_row.get('면적 (km²)', 0)
-        ratio_val = target_row.get('인구 대비 교통수단 비율 (개/명)', 0)
+        # [변경] 지표
+        ratio_val = target_row.get('대중교통 수 (인구 천명당)', 0)
         rank_val = target_row.get('교통 부족 순위 (위)', 0)
         
-        avg_ratio = gdf['인구 대비 교통수단 비율 (개/명)'].mean() if '인구 대비 교통수단 비율 (개/명)' in gdf.columns else 0
+        avg_ratio = gdf['대중교통 수 (인구 천명당)'].mean() if '대중교통 수 (인구 천명당)' in gdf.columns else 0
         diff = ratio_val - avg_ratio
 
         with c1: st.metric("👥 총 인구", f"{pop_val:,.0f}명")
         with c2: st.metric("🗺️ 면적", f"{area_val:.2f}km²")
-        with c3: st.metric("🚌 교통 비율", f"{ratio_val:.4f}", delta=f"{diff:.4f} (평균 대비)")
+        with c3: st.metric("🚌 천명당 교통수", f"{ratio_val:.2f}개", delta=f"{diff:.2f} (평균 대비)")
         with c4: st.metric("🚨 부족 순위", f"{rank_val:.0f}위", help="1위에 가까울수록 개선이 시급함")
         
         total_trans = target_row.get('총_교통수단_수', 0)
@@ -290,10 +323,11 @@ else:
             center_lat = district_geo.geometry.centroid.y.values[0]
             center_lon = district_geo.geometry.centroid.x.values[0]
             
+            # [변경] 툴팁 컬럼
             hover_cols = [
                 '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
                 '버스정류장 수 (개)', '지하철역 수 (개)', 
-                '인구 대비 교통수단 비율 (개/명)', '교통 부족 순위 (위)'
+                '대중교통 수 (인구 천명당)', '교통 부족 순위 (위)'
             ]
             valid_hover = [c for c in hover_cols if c in gdf.columns]
 
@@ -306,13 +340,14 @@ else:
                 color_continuous_scale='Reds_r'
             )
             
+            # [변경] 툴팁 템플릿 (인구 천명당)
             fig_d.update_traces(
                 hovertemplate="<b>%{customdata[0]}</b><br><br>" +
                 "👥 인구: %{customdata[1]:,.0f}명<br>" +
                 "🗺️ 면적: %{customdata[2]:.2f}km²<br>" +
                 "🚌 버스: %{customdata[3]:,.0f}개<br>" +
                 "🚇 지하철: %{customdata[4]:,.0f}개<br>" +
-                "📊 비율: %{customdata[5]:.4f}<br>" +
+                "📊 천명당: %{customdata[5]:.2f}개<br>" +
                 "🚨 순위: %{customdata[6]:.0f}위<extra></extra>"
             )
 
