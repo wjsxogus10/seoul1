@@ -329,18 +329,6 @@ elif page_mode == "🧩 유형별 4분면 분석":
     scat_fig.update_layout(height=700, showlegend=False)
     
     st.plotly_chart(scat_fig, use_container_width=True)
-    
-    st.markdown("---")
-    st.subheader("💾 분석 데이터 다운로드")
-    df_download = gdf.drop(columns=['geometry'])
-    csv = df_download.to_csv(index=False).encode('utf-8-sig')
-    
-    st.download_button(
-        label="📥 최종 분석 데이터(CSV) 받기",
-        data=csv,
-        file_name='서울시_대중교통_분석결과.csv',
-        mime='text/csv',
-    )
 
 # --------------------------------------------------------------------------
 # PAGE 3: 자치구별 상세 리포트
