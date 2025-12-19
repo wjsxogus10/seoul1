@@ -9,7 +9,7 @@ from shapely.geometry import Point
 # --------------------------------------------------------------------------
 # 1. 페이지 설정
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="서울시 도시계획 대시보드")
+st.set_page_config(layout="wide", page_title="서울시 대중교통 개선선 대시보드""
 
 # --------------------------------------------------------------------------
 # 2. 데이터 로드 및 병합 함수
@@ -198,15 +198,15 @@ gdf, logs, data_info = data_result
 # [변경] 사이드바 메뉴 확장
 page_mode = st.sidebar.radio(
     "페이지 이동", 
-    ["🏙️ 서울시 전체 분석", "🧩 유형별 4분면 분석", "📍 자치구별 상세 리포트"]
+    ["🏙️ 서울시 대중교통 현황 분석", "🧩 유형별 4분면 분석", "📍 자치구별 상세 리포트"]
 )
 st.sidebar.markdown("---")
 
 # --------------------------------------------------------------------------
 # PAGE 1: 서울시 전체 분석 (지도 + 순위)
 # --------------------------------------------------------------------------
-if page_mode == "🏙️ 서울시 전체 분석":
-    st.title("🏙️ 서울시 도시계획 종합 분석")
+if page_mode == "🏙️ 서울시 대중교통 현황 분석":
+    st.title("🏙️ 서울시 대중교통 현황황 분석""
     
     st.sidebar.header("🔍 분석 옵션")
     metrics_order = [
@@ -351,7 +351,7 @@ else:
     district_list = sorted(gdf['자치구명'].unique().tolist())
     selected_district = st.sidebar.selectbox("자치구 선택", district_list)
     
-    st.markdown(f"### **{selected_district}** 도시계획 현황판")
+    st.markdown(f"### **{selected_district}** 대중교통통 현황판"*
     st.markdown("---")
 
     try:
