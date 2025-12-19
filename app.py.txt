@@ -165,7 +165,7 @@ def load_and_merge_data():
     gdf['대중교통 밀도 (면적당)'] = gdf['총_교통수단_수'] / gdf['면적(km²)']
     pop_safe = gdf['총_상주인구_수'].replace(0, 1)
     
-    # [핵심] 인구 1,000명당 대중교통 수
+    # [인구 1,000명당 대중교통 수]
     gdf['대중교통 수 (인구 천명당)'] = (gdf['총_교통수단_수'] / pop_safe) * 1000
     gdf['교통 부족 순위'] = gdf['대중교통 수 (인구 천명당)'].rank(ascending=True, method='min')
 
@@ -195,11 +195,15 @@ if data_result is None or data_result[0] is None:
 
 gdf, logs, data_info = data_result
 
-page_mode = st.sidebar.radio("페이지 이동", ["🏙️ 서울시 전체 분석", "📍 자치구별 상세 리포트"])
+# [변경] 사이드바 메뉴 확장
+page_mode = st.sidebar.radio(
+    "페이지 이동", 
+    ["🏙️ 서울시 전체 분석", "🧩 유형별 4분면 분석", "📍 자치구별 상세 리포트"]
+)
 st.sidebar.markdown("---")
 
 # --------------------------------------------------------------------------
-# PAGE 1: 서울시 전체 분석
+# PAGE 1: 서울시 전체 분석 (지도 + 순위)
 # --------------------------------------------------------------------------
 if page_mode == "🏙️ 서울시 전체 분석":
     st.title("🏙️ 서울시 도시계획 종합 분석")
@@ -280,60 +284,66 @@ if page_mode == "🏙️ 서울시 전체 분석":
         fig_bar.update_layout(showlegend=False, xaxis_title=None, height=500, margin={"r":0,"t":20,"l":0,"b":0}, coloraxis_showscale=False)
         st.plotly_chart(fig_bar, use_container_width=True)
 
-        # [NEW] 4분면 분석 (순위 그래프 다음에 항상 배치)
-        st.markdown("---")
-        st.subheader("🧩 수요(인구밀도) vs 공급(대중교통) 4분면 분석")
-        
-        # 인구 데이터 유무 체크
-        has_pop = gdf['총 상주인구 수 (명)'].sum() > 0
-        if not has_pop:
-            st.warning("⚠️ 인구 데이터가 없어 차트의 '수요(X축)' 및 '점 크기'가 0으로 표시됩니다.")
-            scat_size = None # 크기 고정
-        else:
-            st.caption("💡 오른쪽 아래(↘️)에 위치할수록 **'사람은 많은데 교통은 부족한'** 시급한 지역입니다.")
-            scat_size = '총 상주인구 수 (명)'
+# --------------------------------------------------------------------------
+# PAGE 2: 유형별 4분면 분석 (NEW)
+# --------------------------------------------------------------------------
+elif page_mode == "🧩 유형별 4분면 분석":
+    st.title("🧩 도시 유형별 4분면 분석")
+    st.markdown("---")
+    
+    st.subheader("수요(인구밀도) vs 공급(대중교통) 상관관계")
+    
+    # 인구 데이터 유무 체크
+    has_pop = gdf['총 상주인구 수 (명)'].sum() > 0
+    if not has_pop:
+        st.warning("⚠️ 인구 데이터가 없어 차트의 '수요(X축)' 및 '점 크기'가 0으로 표시됩니다.")
+        scat_size = None
+    else:
+        st.info("💡 **그래프 해석 가이드**\n"
+                "- **우측 하단(↘️)**: 인구 밀도는 높은데 교통 시설이 적은 **'집중 관리 대상'**입니다.\n"
+                "- **좌측 상단(↖️)**: 인구 밀도는 낮은데 교통 시설이 많은 **'교통 여유 지역'**입니다.")
+        scat_size = '총 상주인구 수 (명)'
 
-        scat_fig = px.scatter(
-            gdf, 
-            x='인구 밀도 (명/km²)', 
-            y='대중교통 수 (인구 천명당)', 
-            text='자치구명',
-            color='교통 부족 순위 (위)', 
-            color_continuous_scale='Reds_r',
-            hover_data=['총 상주인구 수 (명)', '총_교통수단_수'],
-            size=scat_size,
-            size_max=30
-        )
-        
-        # 인구 데이터 없을 때 점 크기 강제 설정
-        if not has_pop:
-            scat_fig.update_traces(marker=dict(size=15))
+    scat_fig = px.scatter(
+        gdf, 
+        x='인구 밀도 (명/km²)', 
+        y='대중교통 수 (인구 천명당)', 
+        text='자치구명',
+        color='교통 부족 순위 (위)', 
+        color_continuous_scale='Reds_r',
+        hover_data=['총 상주인구 수 (명)', '총_교통수단_수'],
+        size=scat_size,
+        size_max=40
+    )
+    
+    if not has_pop:
+        scat_fig.update_traces(marker=dict(size=15))
 
-        mean_x = gdf['인구 밀도 (명/km²)'].mean()
-        mean_y = gdf['대중교통 수 (인구 천명당)'].mean()
+    mean_x = gdf['인구 밀도 (명/km²)'].mean()
+    mean_y = gdf['대중교통 수 (인구 천명당)'].mean()
 
-        scat_fig.add_vline(x=mean_x, line_width=1, line_dash="dash", line_color="grey", annotation_text="평균 인구밀도")
-        scat_fig.add_hline(y=mean_y, line_width=1, line_dash="dash", line_color="grey", annotation_text="평균 공급수준")
+    scat_fig.add_vline(x=mean_x, line_width=1, line_dash="dash", line_color="grey", annotation_text="평균 인구밀도")
+    scat_fig.add_hline(y=mean_y, line_width=1, line_dash="dash", line_color="grey", annotation_text="평균 공급수준")
 
-        scat_fig.update_traces(textposition='top center')
-        scat_fig.update_layout(height=600, showlegend=False)
-        
-        st.plotly_chart(scat_fig, use_container_width=True)
-        
-        st.markdown("---")
-        st.subheader("💾 분석 데이터 다운로드")
-        df_download = gdf.drop(columns=['geometry'])
-        csv = df_download.to_csv(index=False).encode('utf-8-sig')
-        
-        st.download_button(
-            label="📥 최종 분석 데이터(CSV) 받기",
-            data=csv,
-            file_name='서울시_대중교통_분석결과.csv',
-            mime='text/csv',
-        )
+    scat_fig.update_traces(textposition='top center')
+    scat_fig.update_layout(height=700, showlegend=False)
+    
+    st.plotly_chart(scat_fig, use_container_width=True)
+    
+    st.markdown("---")
+    st.subheader("💾 분석 데이터 다운로드")
+    df_download = gdf.drop(columns=['geometry'])
+    csv = df_download.to_csv(index=False).encode('utf-8-sig')
+    
+    st.download_button(
+        label="📥 최종 분석 데이터(CSV) 받기",
+        data=csv,
+        file_name='서울시_대중교통_분석결과.csv',
+        mime='text/csv',
+    )
 
 # --------------------------------------------------------------------------
-# PAGE 2: 자치구별 상세 리포트
+# PAGE 3: 자치구별 상세 리포트
 # --------------------------------------------------------------------------
 else:
     st.title("📍 자치구별 상세 리포트")
@@ -350,7 +360,6 @@ else:
         c1, c2, c3, c4 = st.columns(4)
         pop_val = target_row.get('총 상주인구 수 (명)', 0)
         area_val = target_row.get('면적 (km²)', 0)
-        # [변경] 지표 (천명당)
         ratio_val = target_row.get('대중교통 수 (인구 천명당)', 0)
         rank_val = target_row.get('교통 부족 순위 (위)', 0)
         
@@ -377,7 +386,6 @@ else:
             center_lat = district_geo.geometry.centroid.y.values[0]
             center_lon = district_geo.geometry.centroid.x.values[0]
             
-            # [변경] 툴팁 컬럼
             hover_cols = [
                 '자치구명', '총 상주인구 수 (명)', '면적 (km²)', 
                 '버스정류장 수 (개)', '지하철역 수 (개)', 
@@ -394,66 +402,9 @@ else:
                 color_continuous_scale='Reds_r'
             )
             
-            # [변경] 툴팁 템플릿 (인구 천명당)
             fig_d.update_traces(
                 hovertemplate="<b>%{customdata[0]}</b><br><br>" +
                 "👥 인구: %{customdata[1]:,.0f}명<br>" +
                 "🗺️ 면적: %{customdata[2]:.2f}km²<br>" +
                 "🚌 버스: %{customdata[3]:,.0f}개<br>" +
-                "🚇 지하철: %{customdata[4]:,.0f}개<br>" +
-                "📊 천명당: %{customdata[5]:.2f}개<br>" +
-                "🚨 순위: %{customdata[6]:.0f}위<extra></extra>"
-            )
-
-            highlight_trace = px.choropleth_mapbox(
-                district_geo, geojson=district_geo.geometry.__geo_interface__, locations=district_geo.index,
-                color_discrete_sequence=['#FF4B4B'], opacity=0.9,
-                hover_name='자치구명', hover_data=valid_hover
-            ).data[0]
-            
-            highlight_trace.hovertemplate = fig_d.data[0].hovertemplate
-            fig_d.add_trace(highlight_trace)
-
-            fig_d.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=400, showlegend=False, coloraxis_showscale=False)
-            st.plotly_chart(fig_d, use_container_width=True)
-
-        with col_d2:
-            st.subheader("📊 교통 부족 순위 비교 (낮을수록 시급)")
-            my_val = rank_val
-            avg_rank = gdf['교통 부족 순위 (위)'].mean()
-            
-            df_comp = pd.DataFrame({
-                '구분': [selected_district, '서울시 평균'],
-                '순위': [my_val, avg_rank],
-                '색상': ['My', 'Avg']
-            })
-            
-            fig_comp = px.bar(
-                df_comp, x='구분', y='순위', color='색상',
-                color_discrete_map={'My': '#FF4B4B', 'Avg': 'lightgray'},
-                text='순위'
-            )
-            fig_comp.update_traces(texttemplate='%{text:.0f}위', textposition='outside')
-            fig_comp.update_layout(showlegend=False, margin={"r":0,"t":40,"l":0,"b":0}, height=400, yaxis_title="순위")
-            st.plotly_chart(fig_comp, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"상세 정보를 표시하는 중 오류가 발생했습니다: {e}")
-
-# --------------------------------------------------------------------------
-# [하단] 데이터 출처 표시 (Footer)
-# --------------------------------------------------------------------------
-st.markdown("---")
-with st.expander("📚 사용된 데이터 출처 보기", expanded=False):
-    st.markdown("#### 📂 데이터 파일 현황")
-    
-    source_list = []
-    for cat, info in data_info.items():
-        source_list.append({
-            "데이터 종류": cat,
-            "상태": info.get('status', '❓'),
-            "파일명": info.get('file', '-')
-        })
-    
-    df_source = pd.DataFrame(source_list)
-    st.dataframe(df_source, use_container_width=True, hide_index=True)
+                "
