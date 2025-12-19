@@ -277,7 +277,7 @@ if page_mode == "🏙️ 서울시 전체 분석":
         )
         
         avg_fmt = ",.0f" if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else ",.2f"
-        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="white", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="white")
+        fig_bar.add_hline(y=avg_val, line_dash="dash", line_color="green", annotation_text=f"평균: {avg_val:{avg_fmt}}", annotation_font_color="green")
         
         fmt = '%{text:,.0f}' if '명)' in selected_col or '개)' in selected_col or '위)' in selected_col else '%{text:,.2f}'
         fig_bar.update_traces(texttemplate=fmt, textposition='outside')
@@ -300,8 +300,8 @@ elif page_mode == "🧩 유형별 4분면 분석":
         scat_size = None
     else:
         st.info("💡 **그래프 해석 가이드**\n"
-                "- **우측 하단(↘️)**: 인구 밀도는 높은데 교통 시설이 적은 **'집중 관리 대상'**입니다.\n"
-                "- **좌측 상단(↖️)**: 인구 밀도는 낮은데 교통 시설이 많은 **'교통 여유 지역'**입니다.")
+                "- **우측 하단(↘️)**: 인구 밀도는 높은데 교통 시설이 적은 '집중 관리 대상'입니다.\n"
+                "- **좌측 상단(↖️)**: 인구 밀도는 낮은데 교통 시설이 많은 '교통 여유 지역'입니다.")
         scat_size = '총 상주인구 수 (명)'
 
     scat_fig = px.scatter(
